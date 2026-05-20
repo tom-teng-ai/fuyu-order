@@ -1320,7 +1320,12 @@ function openLine() {
     deliveryDate: delivery,
     items: items.map(([n,{qty,unit,note}])=>({name:n,qty:qty||'',unit:unit||'',note:note||''}))
   };
-  const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(orderData))));
+  // 用 UTF-8 安全的 base64 編碼
+  const jsonStr = JSON.stringify(orderData);
+  const utf8Bytes = new TextEncoder().encode(jsonStr);
+  let binary = '';
+  utf8Bytes.forEach(b => binary += String.fromCharCode(b));
+  const encoded = btoa(binary);
   const uploadUrl = GAS_URL + '?action=upload&data=' + encoded;
 
   // 組合 LINE 訊息
