@@ -37,8 +37,7 @@
   .quick-btn.history.has-data { border-color: var(--green); background: #c8ead3; font-weight:700; }
   .quick-btn.quick-order { border-color: #7c3aed; background: #f5f3ff; }
   .quick-btn.quick-order .label { color: #5b21b6; }
-  .quick-btn.upload-catalog { border-color: #0369a1; background: #eff6ff; }
-  .quick-btn.upload-catalog .label { color: #0369a1; }
+
 
   .quick-btn.clear { border-color: #e8b4b0; background: #fdf0ef; }
   .quick-btn.clear .label { color: #c0392b; }
@@ -181,11 +180,7 @@
     <div class="icon">⚡</div>
     <div class="label">快速下單</div>
   </button>
-  <div class="quick-divider"></div>
-  <button class="quick-btn upload-catalog" onclick="openAddItemModal()">
-    <div class="icon">➕</div>
-    <div class="label">新增品項</div>
-  </button>
+
 
   <div class="quick-divider"></div>
   <button class="quick-btn clear" onclick="clearAll()">
@@ -235,7 +230,7 @@
         <div style="color:#059669;font-weight:700">🚚 送貨：<strong id="previewDelivery">-</strong></div>
       </div>
       <table class="preview-table">
-        <thead><tr><th>編號</th><th>品項名稱</th><th>數量</th><th>單位</th><th>備註</th></tr></thead>
+        <thead><tr><th>編號</th><th>品項名稱</th><th>數量</th><th>單位</th><th>備註</th><th></th></tr></thead>
         <tbody id="previewBody"></tbody>
       </table>
 
@@ -1216,6 +1211,20 @@ function openOrderModal() {
       tdNote.appendChild(noteinput);
       tr.innerHTML=`<td style="padding:6px 8px">${i+1}</td><td style="padding:6px 8px">${n}</td><td style="padding:6px 8px;text-align:center">${qty}</td><td style="padding:6px 8px;text-align:center">${unit}</td>`;
       tr.appendChild(tdNote);
+      // 刪除按鈕
+      const tdDel=document.createElement('td');
+      tdDel.style.padding='4px 6px';
+      const delBtn=document.createElement('button');
+      delBtn.textContent='✕';
+      delBtn.style.cssText='background:none;border:none;color:#c0392b;font-size:16px;cursor:pointer;padding:2px 6px;opacity:0.7;font-family:inherit';
+      delBtn.title='刪除此品項';
+      (function(name){ delBtn.addEventListener('click', function(){
+        delete cart[name];
+        autoSave(); renderProducts(); updatePanel();
+        openOrderModal(); // 重新開啟更新畫面
+      }); })(n);
+      tdDel.appendChild(delBtn);
+      tr.appendChild(tdDel);
       tbody.appendChild(tr);
     });
   }
@@ -1318,97 +1327,32 @@ function openLine() {
     items: items.map(([n,{qty,unit,note}])=>({name:n,qty:qty||'',unit:unit||'',note:note||''}))
   };
 
-  // POST 訂單到 Apps Script 取得訂單ID
-  showToast('正在處理訂單...');
-  fetch(GAS_URL, {
-    method: 'POST',
-    headers: {'Content-Type':'application/json'},
-    body: JSON.stringify(orderData)
-  })
-  .then(r => r.json())
-  .then(result => {
-    if (!result.success) throw new Error('儲存失敗');
-    const orderId = result.id;
-    const confirmUrl = GAS_URL + '?id=' + orderId;
+  // 把訂單資料 base64 編碼後放入 GET 網址
+  const jsonStr = JSON.stringify(orderData);
+  const utf8Bytes = new TextEncoder().encode(jsonStr);
+  let binary = '';
+  utf8Bytes.forEach(b => binary += String.fromCharCode(b));
+  const encoded = btoa(binary);
+  const confirmUrl = GAS_URL + '?action=pending&data=' + encodeURIComponent(encoded);
 
-    let msg = '【富煜蔬菜訂單】\n';
-    if(customer) msg += '客戶：' + customer + '\n';
-    if(delivery) msg += '🚚 送貨日期：' + delivery + '\n';
-    msg += '─────────────\n';
-    items.forEach(([n,{qty,unit,note}],i)=>{
-      msg += (i+1) + '. ' + n;
-      if(qty) msg += '　' + qty + unit;
-      if(note) msg += '（' + note + '）';
-      msg += '\n';
-    });
-    msg += '─────────────\n';
-    msg += '📊 確認訂單：' + confirmUrl;
-
-    window.open('https://line.me/R/share?text=' + encodeURIComponent(msg), '_blank');
-    showToast('LINE 已開啟！');
-  })
-  .catch(err => {
-    // 若 POST 失敗，改用舊方式直接傳
-    let msg = '【富煜蔬菜訂單】\n';
-    if(customer) msg += '客戶：' + customer + '\n';
-    if(delivery) msg += '🚚 送貨日期：' + delivery + '\n';
-    msg += '─────────────\n';
-    items.forEach(([n,{qty,unit,note}],i)=>{
-      msg += (i+1) + '. ' + n;
-      if(qty) msg += '　' + qty + unit;
-      if(note) msg += '（' + note + '）';
-      msg += '\n';
-    });
-    msg += '─────────────';
-    window.open('https://line.me/R/share?text=' + encodeURIComponent(msg), '_blank');
-    showToast('LINE 已開啟！');
+  // 組合 LINE 訊息
+  let msg = '【富煜蔬菜訂單】\n';
+  if(customer) msg += '客戶：' + customer + '\n';
+  if(delivery) msg += '🚚 送貨日期：' + delivery + '\n';
+  msg += '─────────────\n';
+  items.forEach(([n,{qty,unit,note}],i)=>{
+    msg += (i+1) + '. ' + n;
+    if(qty) msg += '　' + qty + unit;
+    if(note) msg += '（' + note + '）';
+    msg += '\n';
   });
+  msg += '─────────────\n';
+  msg += '📊 確認訂單：' + confirmUrl;
+
+  window.open('https://line.me/R/share?text=' + encodeURIComponent(msg), '_blank');
+  showToast('LINE 已開啟！');
 }
 
-
-
-// ── 品項目錄（localStorage 支援）─────────────────────────────────
-function updateRuntimeProducts(data) {
-  window._runtimeProducts = data;
-  buildTabs();
-  renderProducts();
-  updatePanel();
-}
-
-function loadRuntimeProducts() {
-  try {
-    var saved = localStorage.getItem(LS_PRODUCTS);
-    if (saved) {
-      var parsed = JSON.parse(saved);
-      if (parsed && Object.keys(parsed).length > 0) {
-        window._runtimeProducts = parsed;
-        return true;
-      }
-    }
-  } catch(e) {}
-  window._runtimeProducts = null;
-  return false;
-}
-
-function getActiveProducts() {
-  return window._runtimeProducts || PRODUCTS;
-}
-
-
-function openQuickOrderModal() {
-  var overlay = document.getElementById('quickOrderOverlay');
-  if (!overlay) { return; }
-  var ta = document.getElementById('quickOrderText');
-  if (ta) { ta.value = ''; ta.style.height = '180px'; }
-  var preview = document.getElementById('quickOrderPhotoPreview');
-  if (preview) preview.style.display = 'none';
-  var img = document.getElementById('quickOrderPhotoImg');
-  if (img) img.src = '';
-  var ro = document.getElementById('quickResultOverlay');
-  if (ro) { ro.classList.remove('open'); ro.style.display = ''; }
-  overlay.style.display = 'flex';
-  overlay.classList.add('open');
-}
 
 function previewOrderPhoto(input) {
   if (!input.files || !input.files[0]) return;
@@ -1655,6 +1599,66 @@ function confirmQuickOrder() {
 }
 
 var pendingQuickItems = [];
+
+
+function getActiveProducts() {
+  return window._runtimeProducts || PRODUCTS;
+}
+
+function loadRuntimeProducts() {
+  try {
+    var saved = localStorage.getItem(LS_PRODUCTS);
+    if (saved) {
+      var parsed = JSON.parse(saved);
+      if (parsed && Object.keys(parsed).length > 0) {
+        window._runtimeProducts = parsed;
+        return true;
+      }
+    }
+  } catch(e) {}
+  window._runtimeProducts = null;
+  return false;
+}
+
+function updateRuntimeProducts(data) {
+  window._runtimeProducts = data;
+  buildTabs(); renderProducts(); updatePanel();
+}
+
+function openQuickOrderModal() {
+  var overlay = document.getElementById('quickOrderOverlay');
+  if (!overlay) return;
+  var ta = document.getElementById('quickOrderText');
+  if (ta) { ta.value = ''; ta.style.height = '180px'; }
+  var preview = document.getElementById('quickOrderPhotoPreview');
+  if (preview) preview.style.display = 'none';
+  var img = document.getElementById('quickOrderPhotoImg');
+  if (img) img.src = '';
+  var ro = document.getElementById('quickResultOverlay');
+  if (ro) { ro.classList.remove('open'); ro.style.display = ''; }
+  overlay.style.display = 'flex';
+  overlay.classList.add('open');
+}
+
+function previewOrderPhoto(input) {
+  if (!input.files || !input.files[0]) return;
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    document.getElementById('quickOrderPhotoImg').src = e.target.result;
+    document.getElementById('quickOrderPhotoPreview').style.display = 'block';
+    document.getElementById('quickOrderText').style.height = '120px';
+  };
+  reader.readAsDataURL(input.files[0]);
+}
+
+function clearOrderPhoto() {
+  var preview = document.getElementById('quickOrderPhotoPreview');
+  if (preview) preview.style.display = 'none';
+  var img = document.getElementById('quickOrderPhotoImg');
+  if (img) img.src = '';
+  var ta = document.getElementById('quickOrderText');
+  if (ta) ta.style.height = '180px';
+}
 
 function close1(id) {
   var el = document.getElementById(id);
