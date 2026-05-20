@@ -1320,13 +1320,13 @@ function openLine() {
     deliveryDate: delivery,
     items: items.map(([n,{qty,unit,note}])=>({name:n,qty:qty||'',unit:unit||'',note:note||''}))
   };
-  // 用 UTF-8 安全的 base64 編碼
+  // 用標準 base64 編碼
   const jsonStr = JSON.stringify(orderData);
   const utf8Bytes = new TextEncoder().encode(jsonStr);
   let binary = '';
   utf8Bytes.forEach(b => binary += String.fromCharCode(b));
   const encoded = btoa(binary);
-  const uploadUrl = GAS_URL + '?action=upload&data=' + encoded;
+  const uploadUrl = GAS_URL + '?action=upload&data=' + encodeURIComponent(encoded);
 
   // 組合 LINE 訊息
   let msg=`【富煜蔬菜訂單】\n`;
@@ -1340,10 +1340,29 @@ function openLine() {
     msg+=`\n`;
   });
   msg+=`─────────────\n`;
-  msg+=`📊 上傳Excel：${uploadUrl}`;
+  msg+=`📊 點此上傳Excel`;
 
   window.open(`https://line.me/R/share?text=${encodeURIComponent(msg)}`,'_blank');
+
+  // 同時把上傳連結存到 sessionStorage 讓使用者可以直接點
+  sessionStorage.setItem('lastUploadUrl', uploadUrl);
   showToast('正在開啟 LINE...');
+
+  // 顯示上傳按鈕
+  showUploadBtn(uploadUrl);
+}
+
+function showUploadBtn(url) {
+  var existing = document.getElementById('uploadBtnBar');
+  if (existing) existing.remove();
+  var bar = document.createElement('div');
+  bar.id = 'uploadBtnBar';
+  bar.style.cssText = 'position:fixed;bottom:80px;left:50%;transform:translateX(-50%);z-index:999;background:#059669;color:white;border-radius:20px;padding:10px 20px;font-size:14px;font-weight:700;cursor:pointer;box-shadow:0 4px 16px rgba(0,0,0,0.2);white-space:nowrap';
+  bar.textContent = '📊 點此上傳Excel到試算表';
+  bar.onclick = function() { window.open(url,'_blank'); bar.remove(); };
+  document.body.appendChild(bar);
+  // 30秒後自動消失
+  setTimeout(function(){ if(bar.parentNode) bar.remove(); }, 30000);
 }
 
 
