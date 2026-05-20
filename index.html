@@ -1394,6 +1394,268 @@ function getActiveProducts() {
   return window._runtimeProducts || PRODUCTS;
 }
 
+
+function openQuickOrderModal() {
+  var overlay = document.getElementById('quickOrderOverlay');
+  if (!overlay) { return; }
+  var ta = document.getElementById('quickOrderText');
+  if (ta) { ta.value = ''; ta.style.height = '180px'; }
+  var preview = document.getElementById('quickOrderPhotoPreview');
+  if (preview) preview.style.display = 'none';
+  var img = document.getElementById('quickOrderPhotoImg');
+  if (img) img.src = '';
+  var ro = document.getElementById('quickResultOverlay');
+  if (ro) { ro.classList.remove('open'); ro.style.display = ''; }
+  overlay.style.display = 'flex';
+  overlay.classList.add('open');
+}
+
+function previewOrderPhoto(input) {
+  if (!input.files || !input.files[0]) return;
+  var file = input.files[0];
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    document.getElementById('quickOrderPhotoImg').src = e.target.result;
+    document.getElementById('quickOrderPhotoPreview').style.display = 'block';
+    document.getElementById('quickOrderText').style.height = '120px';
+  };
+  reader.readAsDataURL(file);
+}
+
+function clearOrderPhoto() {
+  var preview = document.getElementById('quickOrderPhotoPreview');
+  if (preview) preview.style.display = 'none';
+  var img = document.getElementById('quickOrderPhotoImg');
+  if (img) img.src = '';
+  var ta = document.getElementById('quickOrderText');
+  if (ta) ta.style.height = '180px';
+}
+
+function getAllProductNames() {
+  var map = {};
+  var cats = Object.values(getActiveProducts());
+  for (var ci = 0; ci < cats.length; ci++) {
+    var items = cats[ci];
+    for (var ii = 0; ii < items.length; ii++) {
+      map[items[ii][0]] = items[ii][1];
+    }
+  }
+  return map;
+}
+
+function parseRestQtyUnit(rest, ALL_UNITS) {
+  var parsedQty = null, parsedUnit = null, rawUnit = null;
+  if (!rest) return { qty: parsedQty, unit: parsedUnit, rawUnit: rawUnit };
+  rest = rest
+    .replace(/([0-9]+)斤半/g, function(m,n){ return (parseFloat(n)+0.5)+'斤'; })
+    .replace(/([0-9]+)兩半/g, function(m,n){ return (parseFloat(n)+0.5)+'兩'; })
+    .replace(/^半(\S*)/, '0.5$1')
+    .replace(/\s半(\S*)/g, ' 0.5$1');
+  var parts = rest.split(/\s+/);
+  for (var pi = 0; pi < parts.length; pi++) {
+    var p = parts[pi].trim();
+    if (!p) continue;
+    var m = p.match(/^([0-9]*\.?[0-9]+)([^0-9.]*)$/);
+    if (m) {
+      if (!isNaN(m[1])) parsedQty = parseFloat(m[1]);
+      var upart = m[2].trim();
+      if (upart) { rawUnit = upart; if (ALL_UNITS.indexOf(upart) >= 0) parsedUnit = upart; }
+    } else if (!isNaN(p) && p !== '') {
+      parsedQty = parseFloat(p);
+    } else if (ALL_UNITS.indexOf(p) >= 0) {
+      parsedUnit = p; rawUnit = p;
+    } else if (p.length <= 2 && p.length >= 1) {
+      rawUnit = p;
+    }
+  }
+  return { qty: parsedQty, unit: parsedUnit, rawUnit: rawUnit };
+}
+
+function processQuickOrder() {
+  var ta = document.getElementById('quickOrderText');
+  var text = ta ? ta.value.trim() : '';
+  if (!text) { showToast('請輸入品項文字'); return; }
+  var productMap = getAllProductNames();
+  var allNames = Object.keys(productMap);
+  var rawLines = text.split(/[\r\n]+/);
+  var lines = [];
+  for (var i = 0; i < rawLines.length; i++) {
+    var l = rawLines[i].trim();
+    if (l) lines.push(l);
+  }
+  var ALL_UNITS = ['斤','件','兩','板','包','罐','盒','袋','束','顆','條','塊','片','把','支','桶','瓶','粒','籃','箱','封'];
+  var success = [], errors = [];
+  for (var li = 0; li < lines.length; li++) {
+    var origLine = lines[li];
+    var line = origLine.replace(/：/g,' ').replace(/[（(][^）)]*[）)]/g,'').replace(/\s+/g,' ').trim();
+    var matchedName = null;
+    for (var ni = 0; ni < allNames.length; ni++) {
+      var pname = allNames[ni];
+      if (line.indexOf(pname) === 0) {
+        if (!matchedName || pname.length > matchedName.length) matchedName = pname;
+      }
+    }
+    var restText = matchedName ? line.slice(matchedName.length).trim() : '';
+    var parsed = parseRestQtyUnit(restText, ALL_UNITS);
+    var qty = parsed.qty !== null ? parsed.qty : 1;
+    if (!matchedName) {
+      var keywords = line.replace(/[0-9\s斤件兩板包罐盒袋束顆條塊片把支桶瓶粒籃箱封]/g,'').trim();
+      var similar = [];
+      for (var si2 = 0; si2 < allNames.length; si2++) {
+        var n2 = allNames[si2];
+        for (var ci = 0; ci < keywords.length; ci++) {
+          if (n2.indexOf(keywords[ci]) >= 0) { if (similar.indexOf(n2) < 0) similar.push(n2); break; }
+        }
+      }
+      if (similar.length === 0) {
+        for (var ki2 = 0; ki2 < line.length; ki2++) {
+          var ch = line.charAt(ki2);
+          if (ch.match(/[一-龥]/)) {
+            for (var si3 = 0; si3 < allNames.length; si3++) {
+              if (allNames[si3].indexOf(ch) >= 0 && similar.indexOf(allNames[si3]) < 0) similar.push(allNames[si3]);
+            }
+          }
+        }
+      }
+      similar = similar.slice(0, 5);
+      var suggestions = similar.map(function(sname) {
+        var sunits = productMap[sname];
+        var sunit = (parsed.unit && sunits.indexOf(parsed.unit) >= 0) ? parsed.unit :
+                    (parsed.rawUnit && sunits.indexOf(parsed.rawUnit) >= 0) ? parsed.rawUnit : sunits[0];
+        return { name: sname, qty: qty, unit: sunit };
+      });
+      errors.push({ line: origLine, reason: '找不到品項', suggestions: suggestions });
+      continue;
+    }
+    var defaultUnits = productMap[matchedName];
+    var unit = parsed.unit ? parsed.unit : (parsed.rawUnit ? parsed.rawUnit : defaultUnits[0]);
+    success.push({ name: matchedName, qty: qty, unit: unit });
+  }
+  pendingQuickItems = success;
+  showQuickResult(success, errors);
+}
+
+function addSuggestion(name, qty, unit) {
+  cart[name] = { qty: qty, unit: unit };
+  autoSave(); renderProducts(); updatePanel();
+  showToast('✅ 已加入「' + name + '」' + qty + unit);
+}
+
+function showQuickResult(success, errors) {
+  var header = document.getElementById('quickResultHeader');
+  var title = document.getElementById('quickResultTitle');
+  var body = document.getElementById('quickResultBody');
+  var confirmBtn = document.getElementById('quickResultConfirmBtn');
+  var hasSuccess = success.length > 0, hasError = errors.length > 0;
+  if (!hasError && hasSuccess) { header.style.background='#2d6a4f'; title.textContent='解析成功，共 '+success.length+' 項'; }
+  else if (hasError && !hasSuccess) { header.style.background='#c0392b'; title.textContent='解析失敗，共 '+errors.length+' 行有問題'; }
+  else { header.style.background='#d97706'; title.textContent='部分成功：'+success.length+' 項成功，'+errors.length+' 行有問題'; }
+  body.innerHTML = '';
+  if (success.length > 0) {
+    var sTitle = document.createElement('div');
+    sTitle.style.cssText = 'font-weight:700;color:#2d6a4f;margin-bottom:8px;font-size:13px';
+    sTitle.textContent = '✅ 可加入的品項（' + success.length + ' 項）';
+    body.appendChild(sTitle);
+    var tbl = document.createElement('table');
+    tbl.style.cssText = 'width:100%;border-collapse:collapse;font-size:13px;margin-bottom:14px';
+    tbl.innerHTML = '<thead><tr><th style="background:#2d6a4f;color:white;padding:6px 8px;text-align:left">品項</th><th style="background:#2d6a4f;color:white;padding:6px 8px;text-align:center">數量</th><th style="background:#2d6a4f;color:white;padding:6px 8px;text-align:center">單位</th></tr></thead>';
+    var tbody = document.createElement('tbody');
+    success.forEach(function(item, si) {
+      var tr = document.createElement('tr');
+      tr.style.background = si%2===0?'#f0faf2':'white';
+      tr.innerHTML = '<td style="padding:6px 8px">'+item.name+'</td><td style="padding:6px 8px;text-align:center">'+item.qty+'</td><td style="padding:6px 8px;text-align:center">'+item.unit+'</td>';
+      tbody.appendChild(tr);
+    });
+    tbl.appendChild(tbody); body.appendChild(tbl);
+  }
+  if (errors.length > 0) {
+    var eTitle = document.createElement('div');
+    eTitle.style.cssText = 'font-weight:700;color:#c0392b;margin-bottom:8px;font-size:13px';
+    eTitle.textContent = '❓ 無法辨識的品項（' + errors.length + ' 行）';
+    body.appendChild(eTitle);
+    var errWrap = document.createElement('div');
+    errWrap.style.cssText = 'border-radius:8px;overflow:hidden;border:1px solid #e8b4b0';
+    var ALL_UNITS_F = ['斤','件','兩','板','包','罐','盒','袋','束','顆','條','塊','片','把','支','桶','瓶','粒','籃','箱','封'];
+    errors.forEach(function(e, ei) {
+      var row = document.createElement('div');
+      row.style.cssText = 'padding:8px 12px;border-bottom:1px solid #f5ddd0;background:'+(ei%2===0?'#fdf8f0':'white');
+      var lineDiv = document.createElement('div');
+      lineDiv.style.cssText = 'font-size:12px;font-weight:700;color:#c0392b;margin-bottom:6px';
+      lineDiv.textContent = e.line; row.appendChild(lineDiv);
+      if (e.suggestions && e.suggestions.length > 0) {
+        var suggLabel = document.createElement('div');
+        suggLabel.style.cssText = 'font-size:11px;color:#888;margin-bottom:4px';
+        suggLabel.textContent = '您是否要找：'; row.appendChild(suggLabel);
+        var suggWrap = document.createElement('div');
+        suggWrap.style.cssText = 'display:flex;flex-wrap:wrap;gap:5px;margin-bottom:8px';
+        e.suggestions.forEach(function(sg) {
+          var btn = document.createElement('button');
+          btn.style.cssText = 'background:#f77f00;color:white;border:none;border-radius:6px;padding:4px 10px;font-size:12px;font-family:inherit;cursor:pointer;font-weight:700';
+          btn.textContent = sg.name+' '+sg.qty+sg.unit;
+          (function(name,qty,unit){ btn.addEventListener('click', function(){ addSuggestion(name,qty,unit); }); })(sg.name,sg.qty,sg.unit);
+          suggWrap.appendChild(btn);
+        });
+        row.appendChild(suggWrap);
+      } else {
+        var noSugg = document.createElement('div');
+        noSugg.style.cssText = 'font-size:11px;color:#aaa;margin-bottom:6px';
+        noSugg.textContent = '找不到相似品項'; row.appendChild(noSugg);
+      }
+      var forceWrap = document.createElement('div');
+      forceWrap.style.cssText = 'background:#f5f3ff;border:1px solid #c4b5fd;border-radius:8px;padding:6px 10px;display:flex;align-items:center;gap:6px;flex-wrap:wrap';
+      var forceLabel = document.createElement('span');
+      forceLabel.style.cssText = 'font-size:11px;color:#5b21b6;font-weight:700;white-space:nowrap';
+      forceLabel.textContent = '⚡ 強制下單：'; forceWrap.appendChild(forceLabel);
+      var nameInput = document.createElement('input');
+      nameInput.type='text'; nameInput.value=e.line.replace(/[：:].*/,'').trim(); nameInput.placeholder='品項名稱';
+      nameInput.style.cssText='flex:2;min-width:80px;border:1px solid #c4b5fd;border-radius:6px;padding:3px 6px;font-size:12px;font-family:inherit;outline:none';
+      forceWrap.appendChild(nameInput);
+      var qtyInput = document.createElement('input');
+      qtyInput.type='number'; qtyInput.min='0';
+      var qtyMatch = e.line.match(/([0-9]*\.?[0-9]+)/);
+      qtyInput.value = qtyMatch?qtyMatch[1]:'1'; qtyInput.placeholder='數量';
+      qtyInput.style.cssText='width:50px;border:1px solid #c4b5fd;border-radius:6px;padding:3px 6px;font-size:12px;font-family:inherit;outline:none;text-align:center';
+      forceWrap.appendChild(qtyInput);
+      var unitInput = document.createElement('input');
+      unitInput.type='text'; unitInput.value='斤'; unitInput.placeholder='單位';
+      var lineClean = e.line.replace(/[：:]/g,' ');
+      for (var ui=0;ui<ALL_UNITS_F.length;ui++) { if(lineClean.indexOf(ALL_UNITS_F[ui])>=0){unitInput.value=ALL_UNITS_F[ui];break;} }
+      unitInput.style.cssText='width:44px;border:1px solid #c4b5fd;border-radius:6px;padding:3px 6px;font-size:12px;font-family:inherit;outline:none;text-align:center';
+      forceWrap.appendChild(unitInput);
+      var forceBtn = document.createElement('button');
+      forceBtn.textContent='加入';
+      forceBtn.style.cssText='background:#7c3aed;color:white;border:none;border-radius:6px;padding:4px 10px;font-size:12px;font-family:inherit;font-weight:700;cursor:pointer;white-space:nowrap';
+      (function(ni,qi,ui2,fb){
+        fb.addEventListener('click',function(){
+          var name=ni.value.trim(),qty=parseFloat(qi.value)||1,unit=ui2.value.trim()||'斤';
+          if(!name){showToast('請輸入品項名稱');return;}
+          cart[name]={qty:qty,unit:unit}; autoSave(); renderProducts(); updatePanel();
+          fb.textContent='✅ 已加入'; fb.style.background='#2d6a4f'; fb.disabled=true; ni.disabled=true; qi.disabled=true; ui2.disabled=true;
+          showToast('已強制加入「'+name+'」'+qty+unit);
+        });
+      })(nameInput,qtyInput,unitInput,forceBtn);
+      forceWrap.appendChild(forceBtn); row.appendChild(forceWrap); errWrap.appendChild(row);
+    });
+    body.appendChild(errWrap);
+  }
+  confirmBtn.style.display = hasSuccess ? '' : 'none';
+  document.getElementById('quickOrderOverlay').classList.remove('open');
+  (function(){var el=document.getElementById('quickResultOverlay');if(el){el.style.display='flex';el.classList.add('open');}})();
+}
+
+function confirmQuickOrder() {
+  for (var i = 0; i < pendingQuickItems.length; i++) {
+    var item = pendingQuickItems[i];
+    cart[item.name] = { qty: item.qty, unit: item.unit };
+  }
+  autoSave(); renderProducts(); updatePanel();
+  document.getElementById('quickResultOverlay').classList.remove('open');
+  showToast('已加入 ' + pendingQuickItems.length + ' 項品項！');
+  pendingQuickItems = [];
+}
+
+var pendingQuickItems = [];
+
 function close1(id) {
   var el = document.getElementById(id);
   if (el) { el.classList.remove('open'); el.style.display = ''; }
