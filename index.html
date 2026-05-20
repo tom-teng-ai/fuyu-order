@@ -1301,10 +1301,8 @@ function openLine() {
   const orderDate=document.getElementById('orderDate').value||'';
   const delivery=document.getElementById('deliveryDate').value||'';
 
-  // 傳送前先記錄常用品項
   if(Object.keys(cart).length) saveHistory();
 
-  // 若購物車有品項就用購物車，否則用常用品項
   let items=Object.entries(cart);
   if(!items.length){
     try{
@@ -1313,7 +1311,6 @@ function openLine() {
     }catch(e){}
   }
 
-  // 建立訂單資料
   const orderData = {
     customer: customer,
     orderDate: orderDate,
@@ -1321,7 +1318,8 @@ function openLine() {
     items: items.map(([n,{qty,unit,note}])=>({name:n,qty:qty||'',unit:unit||'',note:note||''}))
   };
 
-  // 先把訂單 POST 到 Apps Script 取得訂單ID
+  // POST 訂單到 Apps Script 取得訂單ID
+  showToast('正在處理訂單...');
   fetch(GAS_URL, {
     method: 'POST',
     headers: {'Content-Type':'application/json'},
@@ -1331,9 +1329,8 @@ function openLine() {
   .then(result => {
     if (!result.success) throw new Error('儲存失敗');
     const orderId = result.id;
-    const uploadUrl = GAS_URL + '?id=' + orderId;
+    const confirmUrl = GAS_URL + '?id=' + orderId;
 
-    // 組合 LINE 訊息
     let msg = '【富煜蔬菜訂單】\n';
     if(customer) msg += '客戶：' + customer + '\n';
     if(delivery) msg += '🚚 送貨日期：' + delivery + '\n';
@@ -1345,14 +1342,56 @@ function openLine() {
       msg += '\n';
     });
     msg += '─────────────\n';
-    msg += '📊 確認訂單：' + uploadUrl;
+    msg += '📊 確認訂單：' + confirmUrl;
 
     window.open('https://line.me/R/share?text=' + encodeURIComponent(msg), '_blank');
-    showToast('正在開啟 LINE...');
+    showToast('LINE 已開啟！');
   })
   .catch(err => {
-    showToast('⚠️ 無法連線，請稍後再試');
+    // 若 POST 失敗，改用舊方式直接傳
+    let msg = '【富煜蔬菜訂單】\n';
+    if(customer) msg += '客戶：' + customer + '\n';
+    if(delivery) msg += '🚚 送貨日期：' + delivery + '\n';
+    msg += '─────────────\n';
+    items.forEach(([n,{qty,unit,note}],i)=>{
+      msg += (i+1) + '. ' + n;
+      if(qty) msg += '　' + qty + unit;
+      if(note) msg += '（' + note + '）';
+      msg += '\n';
+    });
+    msg += '─────────────';
+    window.open('https://line.me/R/share?text=' + encodeURIComponent(msg), '_blank');
+    showToast('LINE 已開啟！');
   });
+}
+
+
+
+// ── 品項目錄（localStorage 支援）─────────────────────────────────
+function updateRuntimeProducts(data) {
+  window._runtimeProducts = data;
+  buildTabs();
+  renderProducts();
+  updatePanel();
+}
+
+function loadRuntimeProducts() {
+  try {
+    var saved = localStorage.getItem(LS_PRODUCTS);
+    if (saved) {
+      var parsed = JSON.parse(saved);
+      if (parsed && Object.keys(parsed).length > 0) {
+        window._runtimeProducts = parsed;
+        return true;
+      }
+    }
+  } catch(e) {}
+  window._runtimeProducts = null;
+  return false;
+}
+
+function getActiveProducts() {
+  return window._runtimeProducts || PRODUCTS;
 }
 
 function close1(id) {
