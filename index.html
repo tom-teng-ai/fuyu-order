@@ -149,7 +149,7 @@
     <div class="logo">富煜<span>蔬菜</span></div>
     <div class="subtitle">線上下單系統</div>
   </div>
-  <button class="cart-btn" onclick="openOrderModal()">
+  <button id="pendingBtn" onclick="openPendingOrders()" style="background:transparent;border:2px solid rgba(255,255,255,0.8);color:white;border-radius:20px;padding:7px 16px;font-size:13px;cursor:pointer;margin-right:10px;font-weight:700;display:inline-flex;align-items:center;gap:5px">📋 待確認訂單</button><button class="cart-btn" onclick="openOrderModal()">
     🛒 確認訂單
     <div class="cart-count" id="cartCount">0</div>
   </button>
@@ -1340,7 +1340,7 @@ async function openLine() {
   });
   msg += '─────────────\n';
 
-  // 先傳資料到 Apps Script 取得短 ID
+  // 傳資料到 Apps Script 暫存並取得短 ID
   showToast('傳送中...');
   try {
     const resp = await fetch(GAS_URL + '?action=save_pending', {
@@ -1348,27 +1348,22 @@ async function openLine() {
       body: JSON.stringify(orderData)
     });
     const result = await resp.json();
-    if(result.id) {
-      const confirmUrl = GAS_URL + '?action=pending&id=' + result.id;
-      msg += '📊 確認訂單：' + confirmUrl;
-    } else {
-      // 若 POST 失敗，退回舊方式（base64）
-      const jsonStr = JSON.stringify(orderData);
-      const utf8Bytes = new TextEncoder().encode(jsonStr);
-      let binary = '';
-      utf8Bytes.forEach(b => binary += String.fromCharCode(b));
-      const encoded = btoa(binary);
-      msg += '📊 確認訂單：' + GAS_URL + '?action=pending&data=' + encodeURIComponent(encoded);
+    if (result.id) {
+      const longUrl = GAS_URL + '?action=pending&id=' + result.id;
+      // 用 TinyURL 縮短網址
+      try {
+        const tinyResp = await fetch('https://tinyurl.com/api-create.php?url=' + encodeURIComponent(longUrl));
+        const shortUrl = await tinyResp.text();
+        if (shortUrl.startsWith('https://')) {
+          msg += '📊 確認訂單：' + shortUrl;
+        } else {
+          msg += '📊 確認訂單：' + longUrl;
+        }
+      } catch(e) {
+        msg += '📊 確認訂單：' + longUrl;
+      }
     }
-  } catch(e) {
-    // 網路問題，退回舊方式
-    const jsonStr = JSON.stringify(orderData);
-    const utf8Bytes = new TextEncoder().encode(jsonStr);
-    let binary = '';
-    utf8Bytes.forEach(b => binary += String.fromCharCode(b));
-    const encoded = btoa(binary);
-    msg += '📊 確認訂單：' + GAS_URL + '?action=pending&data=' + encodeURIComponent(encoded);
-  }
+  } catch(e) {}
 
   window.open('https://line.me/R/share?text=' + encodeURIComponent(msg), '_blank');
   showToast('LINE 已開啟！');
@@ -1694,6 +1689,83 @@ function showToast(msg) {
 }
 
 init();
+
+function openPendingOrders() {
+  document.getElementById('pendingOverlay').style.display = 'flex';
+  loadPendingOrders();
+}
+
+function closePendingOrders() {
+  document.getElementById('pendingOverlay').style.display = 'none';
+}
+
+async function loadPendingOrders() {
+  const list = document.getElementById('pendingList');
+  list.innerHTML = '<div style="text-align:center;padding:30px;color:#999">載入中...</div>';
+  try {
+    const resp = await fetch(GAS_URL + '?action=list_pending');
+    const data = await resp.json();
+    if (!data.orders || data.orders.length === 0) {
+      list.innerHTML = '<div style="text-align:center;padding:30px;color:#999;font-size:15px">✅ 目前沒有待確認訂單</div>';
+      return;
+    }
+    list.innerHTML = data.orders.map(function(o) {
+      const d = o.data;
+      const itemsHtml = (d.items||[]).map(function(item,i) {
+        return '<tr><td style="padding:5px 8px">' + (i+1) + '. ' + item.name + '</td><td style="padding:5px 8px;color:#555">' + item.qty + ' ' + item.unit + '</td></tr>';
+      }).join('');
+      return '<div style="border:1px solid #d8f3dc;border-radius:12px;padding:16px;margin-bottom:12px">' +
+        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">' +
+        '<div><strong style="color:#2d6a4f;font-size:15px">' + (d.customer||'未填寫') + '</strong>' +
+        '<span style="color:#888;font-size:13px;margin-left:8px">🚚 ' + (d.deliveryDate||'') + '</span></div>' +
+        '<span style="color:#aaa;font-size:11px">' + o.id + '</span></div>' +
+        '<table style="width:100%;font-size:13px">' + itemsHtml + '</table>' +
+        '<div style="display:flex;gap:8px;margin-top:12px">' +
+        '<button onclick="confirmPending(\'' + o.id + '\', this)" style="flex:1;background:#2d6a4f;color:white;border:none;border-radius:10px;padding:10px;font-size:14px;font-weight:700;cursor:pointer">&#9989; 確認上傳試算表</button>' +
+        '<button onclick="deletePendingOrder(\'' + o.id + '\', this)" style="background:#fee;color:#c0392b;border:1px solid #fcc;border-radius:10px;padding:10px 14px;font-size:13px;cursor:pointer">&#128465;</button>' +
+        '</div></div>';
+    }).join('');
+  } catch(e) {
+    list.innerHTML = '<div style="text-align:center;padding:20px;color:#c0392b">載入失敗：' + e.message + '</div>';
+  }
+}
+
+async function confirmPending(id, btn) {
+  btn.disabled = true;
+  btn.textContent = '上傳中...';
+  try {
+    const resp = await fetch(GAS_URL + '?action=save&id=' + id);
+    const text = await resp.text();
+    btn.closest('div[style*="border:1px"]').style.opacity = '0.4';
+    btn.textContent = '✅ 已上傳！';
+    setTimeout(loadPendingOrders, 1500);
+  } catch(e) {
+    btn.disabled = false;
+    btn.textContent = '✅ 確認上傳試算表';
+    alert('上傳失敗：' + e.message);
+  }
+}
+
+async function deletePendingOrder(id, btn) {
+  if (!confirm('確定刪除這筆待確認訂單？')) return;
+  try {
+    await fetch(GAS_URL + '?action=delete_pending&id=' + id);
+    loadPendingOrders();
+  } catch(e) {
+    alert('刪除失敗');
+  }
+}
 </script>
+
+<!-- 待確認訂單 Modal -->
+<div id="pendingOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:3000;align-items:center;justify-content:center">
+  <div style="background:white;border-radius:20px;padding:24px;width:92%;max-width:640px;max-height:80vh;overflow-y:auto;position:relative">
+    <button onclick="closePendingOrders()" style="position:absolute;top:12px;right:12px;background:none;border:none;font-size:22px;cursor:pointer;color:#888">✕</button>
+    <h2 style="margin:0 0 16px;color:#2d6a4f;font-size:18px">📋 待確認訂單</h2>
+    <div id="pendingList">
+      <div style="text-align:center;padding:30px;color:#999">載入中...</div>
+    </div>
+  </div>
+</div>
 </body>
 </html>
