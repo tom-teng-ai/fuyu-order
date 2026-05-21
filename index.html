@@ -1305,7 +1305,7 @@ function exportExcel() {
   showToast(msg);
 }
 
-function openLine() {
+async function openLine() {
   const customer=document.getElementById('customerName').value||'';
   const orderDate=document.getElementById('orderDate').value||'';
   const delivery=document.getElementById('deliveryDate').value||'';
@@ -1327,15 +1327,7 @@ function openLine() {
     items: items.map(([n,{qty,unit,note}])=>({name:n,qty:qty||'',unit:unit||'',note:note||''}))
   };
 
-  // 把訂單資料 base64 編碼後放入 GET 網址
-  const jsonStr = JSON.stringify(orderData);
-  const utf8Bytes = new TextEncoder().encode(jsonStr);
-  let binary = '';
-  utf8Bytes.forEach(b => binary += String.fromCharCode(b));
-  const encoded = btoa(binary);
-  const confirmUrl = GAS_URL + '?action=pending&data=' + encodeURIComponent(encoded);
-
-  // 組合 LINE 訊息
+  // 組合 LINE 訊息（不含確認連結先）
   let msg = '【富煜蔬菜訂單】\n';
   if(customer) msg += '客戶：' + customer + '\n';
   if(delivery) msg += '🚚 送貨日期：' + delivery + '\n';
@@ -1347,7 +1339,36 @@ function openLine() {
     msg += '\n';
   });
   msg += '─────────────\n';
-  msg += '📊 確認訂單：' + confirmUrl;
+
+  // 先傳資料到 Apps Script 取得短 ID
+  showToast('傳送中...');
+  try {
+    const resp = await fetch(GAS_URL + '?action=save_pending', {
+      method: 'POST',
+      body: JSON.stringify(orderData)
+    });
+    const result = await resp.json();
+    if(result.id) {
+      const confirmUrl = GAS_URL + '?action=pending&id=' + result.id;
+      msg += '📊 確認訂單：' + confirmUrl;
+    } else {
+      // 若 POST 失敗，退回舊方式（base64）
+      const jsonStr = JSON.stringify(orderData);
+      const utf8Bytes = new TextEncoder().encode(jsonStr);
+      let binary = '';
+      utf8Bytes.forEach(b => binary += String.fromCharCode(b));
+      const encoded = btoa(binary);
+      msg += '📊 確認訂單：' + GAS_URL + '?action=pending&data=' + encodeURIComponent(encoded);
+    }
+  } catch(e) {
+    // 網路問題，退回舊方式
+    const jsonStr = JSON.stringify(orderData);
+    const utf8Bytes = new TextEncoder().encode(jsonStr);
+    let binary = '';
+    utf8Bytes.forEach(b => binary += String.fromCharCode(b));
+    const encoded = btoa(binary);
+    msg += '📊 確認訂單：' + GAS_URL + '?action=pending&data=' + encodeURIComponent(encoded);
+  }
 
   window.open('https://line.me/R/share?text=' + encodeURIComponent(msg), '_blank');
   showToast('LINE 已開啟！');
