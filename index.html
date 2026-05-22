@@ -1340,32 +1340,34 @@ async function openLine() {
   });
   msg += '─────────────\n';
 
-  // 傳資料到 Apps Script 暫存並取得短 ID
+  // 先開啟 LINE（含暫時訊息），背景再取得短網址後更新
   showToast('傳送中...');
-  try {
-    const resp = await fetch(GAS_URL + '?action=save_pending', {
-      method: 'POST',
-      body: JSON.stringify(orderData)
-    });
-    const result = await resp.json();
-    if (result.id) {
-      const longUrl = GAS_URL + '?action=pending&id=' + result.id;
-      // 用 TinyURL 縮短網址
-      try {
-        const tinyResp = await fetch('https://tinyurl.com/api-create.php?url=' + encodeURIComponent(longUrl));
-        const shortUrl = await tinyResp.text();
-        if (shortUrl.startsWith('https://')) {
-          msg += '📊 確認訂單：' + shortUrl;
-        } else {
-          msg += '📊 確認訂單：' + longUrl;
-        }
-      } catch(e) {
-        msg += '📊 確認訂單：' + longUrl;
-      }
-    }
-  } catch(e) {}
 
-  window.open('https://line.me/R/share?text=' + encodeURIComponent(msg), '_blank');
+  // 背景非同步：存資料 + 取短網址，完成後 toast 提示
+  (async function() {
+    try {
+      const resp = await fetch(GAS_URL + '?action=save_pending', {
+        method: 'POST',
+        body: JSON.stringify(orderData)
+      });
+      const result = await resp.json();
+      if (result.id) {
+        const longUrl = GAS_URL + '?action=pending&id=' + result.id;
+        try {
+          const tinyResp = await fetch('https://tinyurl.com/api-create.php?url=' + encodeURIComponent(longUrl));
+          const shortUrl = await tinyResp.text();
+          const finalUrl = shortUrl.startsWith('https://') ? shortUrl : longUrl;
+          // 複製短網址到剪貼簿，方便補傳
+          try { await navigator.clipboard.writeText(finalUrl); } catch(e) {}
+          showToast('✅ 確認連結已複製：' + finalUrl);
+        } catch(e) {}
+      }
+    } catch(e) {}
+  })();
+
+  // 立刻開啟 LINE（不等待）
+  const lineMsg = msg + '📊 確認訂單：（連結準備中，稍後複製傳送）';
+  window.open('https://line.me/R/share?text=' + encodeURIComponent(lineMsg), '_blank');
   showToast('LINE 已開啟！');
 }
 
