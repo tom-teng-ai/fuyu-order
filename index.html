@@ -1327,7 +1327,7 @@ async function openLine() {
     items: items.map(([n,{qty,unit,note}])=>({name:n,qty:qty||'',unit:unit||'',note:note||''}))
   };
 
-  // 組合 LINE 訊息（不含確認連結先）
+  // 組合 LINE 訊息
   let msg = '【富煜蔬菜訂單】\n';
   if(customer) msg += '客戶：' + customer + '\n';
   if(delivery) msg += '🚚 送貨日期：' + delivery + '\n';
@@ -1340,11 +1340,9 @@ async function openLine() {
   });
   msg += '─────────────\n';
 
-  // 先開啟 LINE（含暫時訊息），背景再取得短網址後更新
   showToast('傳送中...');
 
-  // 先存資料取得 6 碼 ID，同時背景縮短網址
-  showToast('傳送中...');
+  // 步驟1：存資料取得 ID（約3秒）
   let confirmUrl = '';
   try {
     const resp = await fetch(GAS_URL + '?action=save_pending', {
@@ -1354,22 +1352,22 @@ async function openLine() {
     const result = await resp.json();
     if (result.id) {
       confirmUrl = GAS_URL + '?action=pending&id=' + result.id;
-      // 背景縮短網址，完成後 toast 提示可複製更短的
-      (async function() {
-        try {
-          const tinyResp = await fetch('https://tinyurl.com/api-create.php?url=' + encodeURIComponent(confirmUrl));
-          const shortUrl = await tinyResp.text();
-          if (shortUrl.startsWith('https://')) {
-            try { await navigator.clipboard.writeText(shortUrl); } catch(e) {}
-            showToast('🔗 短網址已複製！可補傳：' + shortUrl, 5000);
-          }
-        } catch(e) {}
-      })();
     }
   } catch(e) {}
 
-  // 立刻開啟 LINE，含真實連結（6碼 ID 版）
-  if (confirmUrl) msg += '📊 確認訂單：' + confirmUrl;
+  // 步驟2：用 TinyURL 縮短（約0.4秒）
+  if (confirmUrl) {
+    try {
+      const tinyResp = await fetch('https://tinyurl.com/api-create.php?url=' + encodeURIComponent(confirmUrl));
+      const shortUrl = await tinyResp.text();
+      if (shortUrl.startsWith('https://')) {
+        confirmUrl = shortUrl;
+      }
+    } catch(e) {}
+  }
+
+  // 步驟3：加入連結並開啟 LINE
+  if (confirmUrl) msg += '📊 確認訂單：' + confirmUrl + '\n';
   window.open('https://line.me/R/share?text=' + encodeURIComponent(msg), '_blank');
   showToast('LINE 已開啟！');
 }
