@@ -183,9 +183,9 @@
 
 
   <div class="quick-divider"></div>
-  <button class="quick-btn clear" onclick="clearAll()">
-    <div class="icon">🗑</div>
-    <div class="label">清除全部</div>
+  <button class="quick-btn" onclick="loadLastOrder()">
+    <div class="icon">🔄</div>
+    <div class="label">上次訂單</div>
   </button>
 </div>
 
@@ -1088,10 +1088,18 @@ function updatePanel() {
 
 function removeItem(name) { delete cart[name]; updateCard(name); updatePanel(); autoSave(); }
 
-function clearAll() {
-  if (!Object.keys(cart).length) { showToast('目前沒有品項'); return; }
-  if (!confirm('確定要清除目前所有品項嗎？')) return;
-  cart={}; renderProducts(); updatePanel(); autoSave();
+function loadLastOrder() {
+  const last = localStorage.getItem('lastOrder');
+  if (!last) { showToast('尚無上次訂單記錄'); return; }
+  try {
+    const lastCart = JSON.parse(last);
+    if (!Object.keys(lastCart).length) { showToast('上次訂單是空的'); return; }
+    cart = lastCart;
+    renderProducts();
+    updatePanel();
+    autoSave();
+    showToast('已載入上次訂單 ✓');
+  } catch(e) { showToast('載入失敗'); }
 }
 
 // ── 歷史品項 ─────────────────────────────────────
@@ -1373,8 +1381,15 @@ async function openLine() {
 
   // 步驟3：加入連結並開啟 LINE
   if (confirmUrl) msg += '📊 確認訂單：' + confirmUrl + '\n';
+  // 儲存這次訂單為「上次訂單」，然後自動清除
+  if (Object.keys(cart).length) {
+    localStorage.setItem('lastOrder', JSON.stringify(cart));
+    cart = {};
+    renderProducts();
+    updatePanel();
+    autoSave();
+  }
   window.location.href = 'https://line.me/R/share?text=' + encodeURIComponent(msg);
-  showToast('LINE 已開啟！');
 }
 
 
