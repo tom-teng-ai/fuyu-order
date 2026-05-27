@@ -1175,7 +1175,7 @@ function openHistoryModal() {
             onclick="this.select()">
         </td>
         <td style="padding:4px 6px;text-align:center">
-          <select id="hunit_${idx}" style="font-size:12px;border:1px solid var(--border);border-radius:6px;padding:3px 4px;font-family:inherit">
+          <select id="hunit_${idx}" style="font-size:12px;border:1.5px solid var(--green);border-radius:6px;padding:4px 6px;font-family:inherit;background:white;color:var(--green);font-weight:600;cursor:pointer;min-width:48px;">
             ${units.map(u=>`<option value="${u}">${u}</option>`).join('')}
           </select>
         </td>
