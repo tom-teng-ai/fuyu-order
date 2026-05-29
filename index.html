@@ -67,8 +67,7 @@
   .qty-input:focus { border-color: var(--green); }
   .qty-input::-webkit-inner-spin-button, .qty-input::-webkit-outer-spin-button { -webkit-appearance: none; }
   .qty-input[type=number] { -moz-appearance: textfield; }
-  .unit-select { font-size: 11px; border: 1px solid var(--border); border-radius: 6px; padding: 2px 4px; font-family: inherit; color: var(--text-muted); background: white; cursor: pointer; margin-top: 4px; width: 100%; display: none; }
-  .has-qty .unit-select { display: block; }
+  .unit-select { font-size: 11px; border: 1px solid var(--border); border-radius: 6px; padding: 2px 4px; font-family: inherit; color: var(--text-muted); background: white; cursor: pointer; margin-top: 4px; width: 100%; display: block; }
   .qty-badge { position: absolute; top: 6px; right: 6px; background: var(--accent); color: white; border-radius: 50%; width: 18px; height: 18px; font-size: 10px; font-weight: 700; display: none; align-items: center; justify-content: center; }
   .has-qty .qty-badge { display: flex; }
   .order-panel { width: 280px; background: white; border-left: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden; }
@@ -580,10 +579,10 @@ const PRODUCTS = {
     ['便宜菇頭', ['斤', '包', '兩']],
     ['漂亮菇頭', ['斤', '包', '件', '兩']],
     ['杏包菇C', ['斤', '包', '兩']],
-    ['小包金針菇', ['斤', '包', '件', '兩']],
+    ['小包金針菇', ['包', '件']],
     ['秀珍菇', ['斤', '包', '兩']],
-    ['包裝鴻喜菇', ['斤', '包', '兩', '件']],
-    ['包裝美白菇', ['斤', '包', '兩', '件']],
+    ['包裝鴻喜菇', ['包', '件']],
+    ['包裝美白菇', ['包', '件']],
     ['漂亮中菇', ['斤', '包', '兩']],
     ['木耳', ['斤', '包', '兩']],
     ['洋菇', ['斤', '盒', '兩']],
@@ -597,9 +596,9 @@ const PRODUCTS = {
     ['杏鮑菇B', ['斤', '包', '兩']],
     ['便宜香菇', ['斤', '包', '兩']],
     ['金針菇B', ['斤', '包', '兩']],
-    ['金針菇A', ['斤', '包', '兩']],
-    ['散鴻喜菇', ['斤', '包', '兩']],
-    ['散美白菇', ['斤', '包', '兩']],
+    ['金針菇A', ['袋']],
+    ['散鴻喜菇', ['斤']],
+    ['散美白菇', ['斤']],
     ['川耳', ['斤', '包', '兩']],
     ['小木耳', ['斤', '包', '兩']],
     ['杏鮑菇', ['斤', '包', '兩']],
@@ -695,6 +694,8 @@ const PRODUCTS = {
     ['中華板豆腐', ['盒', '兩']],
     ['大漢板豆腐', ['盒', '籃', '兩']],
     ['生豆皮', ['斤']],
+
+    ['豆花花生', ['盒']],
   ],
   '醃製類': [
     ['豬血', ['斤', '片']],
@@ -718,6 +719,8 @@ const PRODUCTS = {
     ['雪裡紅', ['斤']],
     ['桶筍絲', ['桶']],
     ['醃黃蘿蔔', ['件', '條']],
+
+    ['玉筍', ['件']],
   ],
   '冷凍商品': [
     ['素丸子', ['斤']],
@@ -778,6 +781,8 @@ const PRODUCTS = {
     ['花枝丸', ['包']],
     ['火腿丁', ['包']],
     ['蟹味棒', ['包']],
+
+    ['素肉羹', ['斤']],
   ],
   '肉類': [
     ['香腸', ['斤']],
@@ -818,6 +823,10 @@ const PRODUCTS = {
     ['嘴邊肉', ['斤', '付']],
     ['鴨胸肉', ['斤']],
     ['黑毛肚', ['斤']],
+
+    ['全鴨', ['隻', '斤']],
+
+    ['全鵝', ['隻', '斤']],
   ],
   '麵品類': [
     ['冬粉', ['斤', '包', '件']],
@@ -930,15 +939,21 @@ const PRODUCTS = {
     ['熟粉圓', ['包']],
     ['粽繩', ['串']],
     ['黃喉', ['斤']],
+
+    ['花生麵筋', ['件']],
+
+    ['乳瑪琳', ['瓶']],
+
+    ['水果愛玉', ['盒']],
   ],
   '蛋': [
-    ['滷蛋', ['斤', '顆']],
-    ['皮蛋', ['粒']],
-    ['鹹蛋', ['粒']],
+    ['滷蛋', ['顆']],
+    ['皮蛋', ['顆']],
+    ['鹹蛋', ['顆']],
     ['雞蛋', ['斤', '件']],
     ['鹹蛋黃', ['顆']],
-    ['蔥蛋', ['粒']],
-    ['菜圃蛋', ['粒']],
+    ['蔥蛋', ['顆']],
+    ['菜圃蛋', ['顆']],
     ['生鴨蛋', ['斤']],
     ['盒裝雞蛋', ['盒']],
   ],
@@ -952,6 +967,8 @@ const PRODUCTS = {
     ['水煮花生', ['斤']],
     ['丁香花生', ['斤']],
     ['泡菜', ['斤']],
+
+    ['鹹蛤蜊', ['斤']],
   ],
 };
 
@@ -1265,7 +1282,12 @@ function openOrderModal() {
       const tdNote=document.createElement('td');
       tdNote.style.padding='6px 8px';
       tdNote.appendChild(noteinput);
-      tr.innerHTML=`<td style="padding:6px 8px">${i+1}</td><td style="padding:6px 8px">${n}</td><td style="padding:6px 8px;text-align:center">${qty}</td><td style="padding:6px 8px;text-align:center">${unit}</td>`;
+      const units = getProductUnits(n);
+      const unitOptions = units.map(u=>`<option value="${u}" ${u===unit?'selected':''}>${u}</option>`).join('');
+      const unitSelect = units.length > 1
+        ? `<select onchange="cart['${n}'].unit=this.value;autoSave();" style="font-size:12px;border:1.5px solid var(--green);border-radius:6px;padding:3px 6px;font-family:inherit;background:white;color:var(--green);font-weight:600;cursor:pointer;">${unitOptions}</select>`
+        : `<span style="font-size:13px">${unit}</span>`;
+      tr.innerHTML=`<td style="padding:6px 8px">${i+1}</td><td style="padding:6px 8px">${n}</td><td style="padding:6px 8px;text-align:center">${qty}</td><td style="padding:6px 8px;text-align:center">${unitSelect}</td>`;
       tr.appendChild(tdNote);
       // 刪除按鈕
       const tdDel=document.createElement('td');
