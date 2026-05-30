@@ -492,7 +492,7 @@ const PRODUCTS = {
     ['芋頭', ['斤', '件', '顆', '兩']],
     ['西洋芹', ['斤', '件', '把', '兩']],
     ['筊白筍', ['斤', '件', '包', '兩']],
-    ['盒裝玉米筍', ['斤', '件', '盒']],
+    ['盒裝玉米筍', ['盒']],
     ['帶殼玉米筍', ['斤', '件', '包', '兩']],
     ['白蘿蔔', ['斤', '件', '條']],
     ['紅蘿蔔', ['斤', '件', '條']],
@@ -533,6 +533,7 @@ const PRODUCTS = {
     ['去皮玉米', ['斤', '件']],
     ['佛手瓜', ['斤', '件', '顆']],
     ['碎花瓜', ['件']],
+    ['5斤箱裝玉米筍', ['件']],
   ],
   '香料類': [
     ['香菜', ['斤', '件', '兩']],
@@ -661,12 +662,6 @@ const PRODUCTS = {
     ['豆包', ['斤', '片', '兩']],
     ['豆腸', ['斤', '兩']],
     ['炸豆包', ['斤', '片', '件', '兩']],
-    ['海帶籤', ['斤', '兩']],
-    ['海帶結', ['斤', '兩']],
-    ['海帶根', ['斤', '兩']],
-    ['海帶絲', ['斤', '兩']],
-    ['海龍', ['斤', '兩']],
-    ['小海帶結', ['斤', '兩']],
     ['中港豆腐', ['件', '兩']],
     ['百葉丁', ['斤', '包', '兩']],
     ['臭豆腐', ['斤', '包', '兩']],
@@ -692,10 +687,11 @@ const PRODUCTS = {
     ['大漢板豆腐', ['盒', '籃', '兩']],
     ['生豆皮', ['斤']],
     ['豆花花生', ['盒']],
+    ['水果愛玉', ['盒']],
   ],
   '醃製類': [
-    ['豬血', ['斤', '片']],
-    ['鴨血', ['斤', '片']],
+    ['豬血', ['片']],
+    ['鴨血', ['片']],
     ['酸菜絲', ['斤', '包']],
     ['酸菜心', ['斤', '顆']],
     ['長酸菜', ['斤', '顆']],
@@ -716,6 +712,12 @@ const PRODUCTS = {
     ['桶筍絲', ['桶']],
     ['醃黃蘿蔔', ['件', '條']],
     ['玉筍', ['件']],
+    ['海帶籤', ['斤', '兩']],
+    ['海帶結', ['斤', '兩']],
+    ['海帶根', ['斤', '兩']],
+    ['海帶絲', ['斤', '兩']],
+    ['海龍', ['斤', '兩']],
+    ['小海帶結', ['斤', '兩']],
   ],
   '冷凍商品': [
     ['素丸子', ['斤']],
@@ -780,7 +782,7 @@ const PRODUCTS = {
   ],
   '肉類': [
     ['香腸', ['斤']],
-    ['去骨雞腿肉', []],
+    ['去骨雞腿肉', ['斤']],
     ['雞心', ['斤']],
     ['雞胗', ['斤']],
     ['二節翅', ['斤']],
@@ -869,11 +871,14 @@ const PRODUCTS = {
     ['大腸', ['斤']],
     ['刻花魷魚', ['斤']],
     ['蚵仔', ['斤']],
-    ['透抽圈', ['斤', '包']],
+    ['透抽圈', ['包']],
     ['草蝦仁', ['斤', '盒']],
     ['生鮮蝦仁', ['斤']],
     ['鱸魚片', ['斤', '片']],
     ['虱目魚片', ['包']],
+    ['黃喉', ['斤']],
+    ['黑毛肚', ['斤']],
+    ['鹹蛤蜊', ['斤']],
   ],
   '雜貨類': [
     ['大米血', ['片', '封']],
@@ -930,10 +935,10 @@ const PRODUCTS = {
     ['南部粽葉', ['斤']],
     ['熟粉圓', ['包']],
     ['粽繩', ['串']],
-    ['黃喉', ['斤']],
     ['花生麵筋', ['件']],
     ['乳瑪琳', ['瓶']],
     ['水果愛玉', ['盒']],
+    ['沙拉醬', ['包']],
   ],
   '蛋': [
     ['滷蛋', ['顆']],
@@ -956,7 +961,6 @@ const PRODUCTS = {
     ['水煮花生', ['斤']],
     ['丁香花生', ['斤']],
     ['泡菜', ['斤']],
-    ['鹹蛤蜊', ['斤']],
   ],
   '豆苗類': [
     ['水豆芽', ['斤']],
@@ -1283,7 +1287,8 @@ function openOrderModal() {
       const unitSelect = units.length > 1
         ? `<select onchange="cart['${n}'].unit=this.value;autoSave();" style="font-size:12px;border:1.5px solid var(--green);border-radius:6px;padding:3px 6px;font-family:inherit;background:white;color:var(--green);font-weight:600;cursor:pointer;">${unitOptions}</select>`
         : `<span style="font-size:13px">${unit}</span>`;
-      tr.innerHTML=`<td style="padding:6px 8px">${i+1}</td><td style="padding:6px 8px">${n}</td><td style="padding:6px 8px;text-align:center">${qty}</td><td style="padding:6px 8px;text-align:center">${unitSelect}</td>`;
+      const qtyInput = `<input type="number" value="${qty}" min="0" step="0.5" onchange="if(cart['${n}']){cart['${n}'].qty=parseFloat(this.value)||0;if(cart['${n}'].qty===0){delete cart['${n}'];}renderProducts();updatePanel();autoSave();openOrderModal();}" style="width:52px;border:1.5px solid var(--green);border-radius:6px;padding:3px 4px;font-size:13px;font-weight:600;text-align:center;font-family:inherit;color:var(--green);background:white;outline:none;" />`;
+      tr.innerHTML=`<td style="padding:6px 8px">${i+1}</td><td style="padding:6px 8px">${n}</td><td style="padding:6px 8px;text-align:center">${qtyInput}</td><td style="padding:6px 8px;text-align:center">${unitSelect}</td>`;
       tr.appendChild(tdNote);
       // 刪除按鈕
       const tdDel=document.createElement('td');
