@@ -1435,13 +1435,17 @@ async function openLine() {
     }
   } catch(e) {}
 
-  // 步驟2：用 TinyURL 縮短（約0.4秒）
+  // 步驟2：用 URLVanish 縮短
   if (confirmUrl) {
     try {
-      const tinyResp = await fetch('https://tinyurl.com/api-create.php?url=' + encodeURIComponent(confirmUrl));
-      const shortUrl = await tinyResp.text();
-      if (shortUrl.startsWith('https://')) {
-        confirmUrl = shortUrl;
+      const vanishResp = await fetch('https://urlvanish.com/api/shorten', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ originalUrl: confirmUrl })
+      });
+      const vanishData = await vanishResp.json();
+      if (vanishData && vanishData.alias && vanishData.alias.startsWith('https://')) {
+        confirmUrl = vanishData.alias;
       }
     } catch(e) {}
   }
