@@ -1255,7 +1255,9 @@ function addHistoryToCart() {
 
 // ── 訂單預覽 ─────────────────────────────────────
 function openOrderModal() {
-  const customer=document.getElementById('customerName').value||'（未填寫）';
+  const customer=document.getElementById('customerName').value.trim();
+  if (!customer) { alert('請輸入客戶名稱'); document.getElementById('customerName').focus(); return; }
+  const customerDisplay = customer || '（未填寫）';
   const date=document.getElementById('orderDate').value||'（未填寫）';
   const delivery=document.getElementById('deliveryDate').value||'（未填寫）';
   document.getElementById('previewCustomer').textContent=customer;
@@ -1384,7 +1386,8 @@ function exportExcel() {
 }
 
 async function openLine() {
-  const customer=document.getElementById('customerName').value||'';
+  const customer=document.getElementById('customerName').value.trim();
+  if (!customer) { alert('請輸入客戶名稱'); document.getElementById('customerName').focus(); return; }
   const orderDate=document.getElementById('orderDate').value||'';
   const delivery=document.getElementById('deliveryDate').value||'';
 
