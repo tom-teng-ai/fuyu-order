@@ -1422,31 +1422,22 @@ async function openLine() {
 
   showToast('傳送中...');
 
-  // 步驟1：存資料取得 ID（約3秒）
+  // 步驟1：存資料，GAS 同時產生 reurl 短網址
   let confirmUrl = '';
   try {
-    const resp = await fetch(GAS_URL + '?action=save_pending', {
+    const resp = await fetch(GAS_URL, {
       method: 'POST',
       body: JSON.stringify(orderData)
     });
     const result = await resp.json();
-    if (result.id) {
+    if (result.shortUrl) {
+      confirmUrl = result.shortUrl;
+    } else if (result.id) {
       confirmUrl = GAS_URL + '?action=pending&id=' + result.id;
     }
   } catch(e) {}
 
-  // 步驟2：用 TinyURL 縮短
-  if (confirmUrl) {
-    try {
-      const tinyResp = await fetch('https://tinyurl.com/api-create.php?url=' + encodeURIComponent(confirmUrl));
-      const shortUrl = await tinyResp.text();
-      if (shortUrl.startsWith('https://')) {
-        confirmUrl = shortUrl;
-      }
-    } catch(e) {}
-  }
-
-  // 步驟3：加入連結並開啟 LINE
+  // 步驟2：加入連結並開啟 LINE
   if (confirmUrl) msg += '📊 確認訂單：' + confirmUrl + '\n';
   // 儲存這次訂單為「上次訂單」，然後自動清除
   if (Object.keys(cart).length) {
