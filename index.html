@@ -1454,39 +1454,17 @@ async function openLine() {
     }
   }
 
-  // 步驟2：有 ID，用 Lejumo 縮短（第一順位）
-  alert('GAS結果 orderId=' + orderId + ' confirmUrl=' + confirmUrl);
+  // 步驟2：有 ID，用 TinyURL 縮短
   if (orderId) {
     const longUrl = GAS_URL + '?action=pending&id=' + orderId;
     try {
-      const lejumoResp = await fetchWithTimeout('https://lejumo.com/api/shorten', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer 6eda76cb46dedb2c366ba5dd9092aca88ef75609bc0aa519'
-        },
-        body: JSON.stringify({ url: longUrl })
-      }, 5000);
-      const lejumoData = await lejumoResp.json();
-      alert('Lejumo回傳：' + JSON.stringify(lejumoData));
-      if (lejumoData && lejumoData.short) {
-        confirmUrl = lejumoData.short; // Lejumo 成功
-      } else {
-        throw new Error('lejumo failed');
-      }
-    } catch(e) {
-      alert('Lejumo錯誤：' + e.message);
-      // 步驟3：Lejumo 失敗，用 TinyURL（第二順位）
-      try {
-        const tinyResp = await fetchWithTimeout(
-          'https://tinyurl.com/api-create.php?url=' + encodeURIComponent(longUrl),
-          {}, 5000
-        );
-        const shortUrl = await tinyResp.text();
-        if (shortUrl.startsWith('https://')) confirmUrl = shortUrl;
-        // TinyURL 失敗，confirmUrl 保持長網址
-      } catch(e2) {}
-    }
+      const tinyResp = await fetchWithTimeout(
+        'https://tinyurl.com/api-create.php?url=' + encodeURIComponent(longUrl),
+        {}, 5000
+      );
+      const shortUrl = await tinyResp.text();
+      if (shortUrl.startsWith('https://')) confirmUrl = shortUrl;
+    } catch(e) {}
   }
 
   // 步驟4：加入連結並開啟 LINE（長網址一定有）
