@@ -1426,24 +1426,32 @@ async function openLine() {
 
   showToast('傳送中...');
 
-  // 步驟1：存資料取得 ID（失敗自動重試一次）
+  // 步驟1：存資料取得 ID（10秒超時，失敗自動重試一次）
   let confirmUrl = '';
   let orderId = '';
-  let gasSuccess = false;
+
+  const fetchWithTimeout = (url, options, timeout) => {
+    return Promise.race([
+      fetch(url, options),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), timeout))
+    ]);
+  };
 
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const resp = await fetch(GAS_URL, {
+      const resp = await fetchWithTimeout(GAS_URL, {
         method: 'POST',
         body: JSON.stringify(orderData)
-      });
+      }, 10000); // 10秒超時
       const result = await resp.json();
       if (result.id) {
         orderId = result.id;
-        gasSuccess = true;
-        // GAS 同時產生 reurl 短網址
-        if (result.shortUrl && result.shortUrl !== GAS_URL + '?action=pending&id=' + result.id) {
-          confirmUrl = result.shortUrl;
+        // GAS 同時產生 reurl 短網址，成功就用
+        const longUrl = GAS_URL + '?action=pending&id=' + result.id;
+        if (result.shortUrl && result.shortUrl !== longUrl) {
+          confirmUrl = result.shortUrl; // reurl 短網址
+        } else {
+          confirmUrl = longUrl; // reurl 失敗，先用長網址
         }
         break;
       }
@@ -1452,22 +1460,22 @@ async function openLine() {
     }
   }
 
-  // 步驟2：有 ID 但沒有短網址，用 TinyURL 縮短
-  if (orderId && !confirmUrl) {
+  // 步驟2：GAS 超時或失敗，用 TinyURL 縮短長網址作為備用
+  if (!confirmUrl && orderId) {
+    // 有 ID 但超時，用 TinyURL
     const longUrl = GAS_URL + '?action=pending&id=' + orderId;
+    confirmUrl = longUrl; // 先確保長網址有值
     try {
-      const tinyResp = await fetch('https://tinyurl.com/api-create.php?url=' + encodeURIComponent(longUrl));
+      const tinyResp = await fetchWithTimeout(
+        'https://tinyurl.com/api-create.php?url=' + encodeURIComponent(longUrl),
+        {}, 5000
+      );
       const shortUrl = await tinyResp.text();
-      if (shortUrl.startsWith('https://')) {
-        confirmUrl = shortUrl;
-      } else {
-        confirmUrl = longUrl; // TinyURL 失敗用長網址
-      }
-    } catch(e) {
-      confirmUrl = longUrl; // TinyURL 失敗用長網址
-    }
+      if (shortUrl.startsWith('https://')) confirmUrl = shortUrl;
+    } catch(e) {}
   }
 
+  // GAS 完全失敗且沒有 ID，confirmUrl 是空的，訊息不含連結
   // 步驟3：加入連結並開啟 LINE
   if (confirmUrl) msg += '📊 確認訂單：' + confirmUrl + '\n';
 
