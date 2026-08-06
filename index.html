@@ -1455,6 +1455,7 @@ async function openLine() {
   }
 
   // 步驟2：有 ID，用 Lejumo 縮短（第一順位）
+  alert('GAS結果 orderId=' + orderId + ' confirmUrl=' + confirmUrl);
   if (orderId) {
     const longUrl = GAS_URL + '?action=pending&id=' + orderId;
     try {
