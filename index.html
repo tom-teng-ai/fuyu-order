@@ -1458,7 +1458,7 @@ async function openLine() {
   if (orderId) {
     const longUrl = GAS_URL + '?action=pending&id=' + orderId;
     try {
-      const lejumoResp = await fetchWithTimeout('https://www.lejumo.com/api/shorten', {
+      const lejumoResp = await fetchWithTimeout('https://lejumo.com/api/shorten', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
