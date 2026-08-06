@@ -1467,12 +1467,14 @@ async function openLine() {
         body: JSON.stringify({ url: longUrl })
       }, 5000);
       const lejumoData = await lejumoResp.json();
+      alert('Lejumo回傳：' + JSON.stringify(lejumoData));
       if (lejumoData && lejumoData.short) {
         confirmUrl = lejumoData.short; // Lejumo 成功
       } else {
         throw new Error('lejumo failed');
       }
     } catch(e) {
+      alert('Lejumo錯誤：' + e.message);
       // 步驟3：Lejumo 失敗，用 TinyURL（第二順位）
       try {
         const tinyResp = await fetchWithTimeout(
