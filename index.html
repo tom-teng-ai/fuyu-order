@@ -1426,31 +1426,46 @@ async function openLine() {
 
   showToast('傳送中...');
 
-  // 步驟1：存資料，GAS 同時產生 reurl 短網址
+  // 步驟1：存資料取得 ID（失敗自動重試一次）
   let confirmUrl = '';
   let orderId = '';
-  try {
-    const resp = await fetch(GAS_URL, {
-      method: 'POST',
-      body: JSON.stringify(orderData)
-    });
-    const result = await resp.json();
-    if (result.shortUrl) {
-      confirmUrl = result.shortUrl;
-    } else if (result.id) {
-      orderId = result.id;
-      confirmUrl = GAS_URL + '?action=pending&id=' + result.id;
-    }
-  } catch(e) {}
+  let gasSuccess = false;
 
-  // 步驟2：如果沒有短網址，用 TinyURL 備用
-  if (orderId && (!confirmUrl || confirmUrl.startsWith(GAS_URL))) {
+  for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const longUrl = GAS_URL + '?action=pending&id=' + orderId;
+      const resp = await fetch(GAS_URL, {
+        method: 'POST',
+        body: JSON.stringify(orderData)
+      });
+      const result = await resp.json();
+      if (result.id) {
+        orderId = result.id;
+        gasSuccess = true;
+        // GAS 同時產生 reurl 短網址
+        if (result.shortUrl && result.shortUrl !== GAS_URL + '?action=pending&id=' + result.id) {
+          confirmUrl = result.shortUrl;
+        }
+        break;
+      }
+    } catch(e) {
+      if (attempt === 0) await new Promise(r => setTimeout(r, 2000)); // 等2秒再重試
+    }
+  }
+
+  // 步驟2：有 ID 但沒有短網址，用 TinyURL 縮短
+  if (orderId && !confirmUrl) {
+    const longUrl = GAS_URL + '?action=pending&id=' + orderId;
+    try {
       const tinyResp = await fetch('https://tinyurl.com/api-create.php?url=' + encodeURIComponent(longUrl));
       const shortUrl = await tinyResp.text();
-      if (shortUrl.startsWith('https://')) confirmUrl = shortUrl;
-    } catch(e) {}
+      if (shortUrl.startsWith('https://')) {
+        confirmUrl = shortUrl;
+      } else {
+        confirmUrl = longUrl; // TinyURL 失敗用長網址
+      }
+    } catch(e) {
+      confirmUrl = longUrl; // TinyURL 失敗用長網址
+    }
   }
 
   // 步驟3：加入連結並開啟 LINE
