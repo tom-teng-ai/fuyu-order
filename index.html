@@ -1426,9 +1426,10 @@ async function openLine() {
 
   showToast('傳送中...');
 
-  // 步驟1：GAS 存訂單取得 ID（10秒超時，失敗自動重試一次）
+  // 步驟1：GAS 存訂單取得 ID 和 GitHub 短網址（10秒超時，失敗自動重試一次）
   let confirmUrl = '';
   let orderId = '';
+  const GITHUB_BASE = 'https://tom-teng-ai.github.io/fuyu-order/o/';
 
   const fetchWithTimeout = (url, options, timeout) => {
     return Promise.race([
@@ -1442,11 +1443,12 @@ async function openLine() {
       const resp = await fetchWithTimeout(GAS_URL, {
         method: 'POST',
         body: JSON.stringify(orderData)
-      }, 10000);
+      }, 20000);
       const result = await resp.json();
       if (result.id) {
         orderId = result.id;
-        confirmUrl = GAS_URL + '?action=pending&id=' + result.id; // 先設定長網址
+        // GitHub 短網址直接由 ID 組合，一定有
+        confirmUrl = result.githubUrl || (GITHUB_BASE + result.id);
         break;
       }
     } catch(e) {
@@ -1454,20 +1456,21 @@ async function openLine() {
     }
   }
 
-  // 步驟2：有 ID，用 TinyURL 縮短
+  // 步驟2：有 GitHub 短網址，嘗試用 TinyURL 縮得更短（第一順位）
   if (orderId) {
-    const longUrl = GAS_URL + '?action=pending&id=' + orderId;
+    const githubUrl = GITHUB_BASE + orderId;
     try {
       const tinyResp = await fetchWithTimeout(
-        'https://tinyurl.com/api-create.php?url=' + encodeURIComponent(longUrl),
+        'https://tinyurl.com/api-create.php?url=' + encodeURIComponent(githubUrl),
         {}, 5000
       );
       const shortUrl = await tinyResp.text();
-      if (shortUrl.startsWith('https://')) confirmUrl = shortUrl;
+      if (shortUrl.startsWith('https://')) confirmUrl = shortUrl; // TinyURL 成功
+      // TinyURL 失敗則保持 GitHub 短網址
     } catch(e) {}
   }
 
-  // 步驟4：加入連結並開啟 LINE（長網址一定有）
+  // 步驟3：加入連結並開啟 LINE（GitHub 短網址一定有）
   if (confirmUrl) msg += '📊 確認訂單：' + confirmUrl + '\n';
 
   // 儲存這次訂單為「上次訂單」，然後自動清除
