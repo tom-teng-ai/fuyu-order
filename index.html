@@ -143,12 +143,20 @@
 </head>
 <body>
 
+<div id="v2Splash" style="position:fixed;inset:0;background:linear-gradient(180deg,#2d6a4f,#1b4332);z-index:100000;display:flex;flex-direction:column;align-items:center;justify-content:center;color:white;text-align:center;padding:20px;">
+  <div style="font-size:56px;margin-bottom:20px;">🥬</div>
+  <div style="font-size:22px;font-weight:700;margin-bottom:10px;">富煜蔬菜為您準備</div>
+  <div style="font-size:15px;color:#d8f3dc;margin-bottom:32px;">新鮮產地直送，馬上就好</div>
+  <div style="width:32px;height:32px;border:3px solid rgba(255,255,255,0.3);border-top-color:white;border-radius:50%;animation:v2spin 0.8s linear infinite;"></div>
+  <style>@keyframes v2spin{to{transform:rotate(360deg);}}</style>
+</div>
+
 <div class="header">
   <div>
     <div class="logo">富煜<span>蔬菜</span></div>
     <div class="subtitle">線上下單系統</div>
   </div>
-  <button id="pendingBtn" onclick="openPendingOrders()" style="display:none">📋 待確認訂單</button><button class="cart-btn" onclick="openOrderModal()">
+  <button id="pendingBtn" onclick="openPendingOrders()" style="display:none">📋 待確認訂單</button><button class="cart-btn" id="btnCartTop" onclick="openOrderModal()">
     🛒 確認訂單
     <div class="cart-count" id="cartCount">0</div>
   </button>
@@ -205,7 +213,7 @@
     </div>
     <div class="panel-footer">
       <div class="total-count">已選 <strong id="totalCount">0</strong> 種品項</div>
-      <button class="export-btn" onclick="openOrderModal()">📋 預覽並傳送訂單</button>
+      <button class="export-btn" id="btnCartSide" onclick="openOrderModal()">📋 預覽並傳送訂單</button>
     </div>
   </div>
 </div>
@@ -978,15 +986,272 @@ const LS_PRODUCTS = 'fuyu_products'; // 自訂品項目錄（上傳 Excel 後儲
 let cart = {};
 let activeCategory = '全部';
 
+// ★ v2 新增：這個測試頁面連到全新、獨立的訂單記憶後端，跟現有正式的 GAS_URL 完全分開
+// 部署好新的 Apps Script 後，把網址貼在這裡
+const V2_GAS_URL = 'https://script.google.com/macros/s/AKfycbzJoshr1TCO-8pCC3ICJyHKfhR1Frz9Q2RctGMbs2nsRgjy-2wdhWYKeneV_HaZzTGM/exec';
+const FRONTEND_VERSION = 'v2.3-2026-08-14'; // ★ 新增全螢幕準備畫面，等資料就緒才淡出進入下單畫面
+
+let editingOrderId = null; // 目前是不是正在編輯一張既有訂單（有值代表「更新」，null 代表「新建」）
+
+// ★ v2 新增：全螢幕準備畫面，等背景查詢完成（或至少顯示過最短時間，避免太快閃一下很突兀）才淡出
+let _splashMinTimePassed = false;
+setTimeout(() => { _splashMinTimePassed = true; tryHideSplash(); }, 500);
+let _splashDataReady = false;
+function markSplashDataReady() { _splashDataReady = true; tryHideSplash(); }
+setTimeout(() => { markSplashDataReady(); }, 8000); // ★ 保險：萬一網路異常卡住，最多8秒後還是會強制進入畫面
+function tryHideSplash() {
+  if (!_splashMinTimePassed || !_splashDataReady) return;
+  const el = document.getElementById('v2Splash');
+  if (!el) return;
+  el.style.transition = 'opacity 0.3s';
+  el.style.opacity = '0';
+  setTimeout(() => el.remove(), 300);
+}
+
 // ── 初始化 ────────────────────────────────────────
 function init() {
+  const v = document.createElement('div');
+  v.style.cssText = 'position:fixed;bottom:4px;right:6px;font-size:10px;color:#bbb;z-index:99999;';
+  v.textContent = '前端 ' + FRONTEND_VERSION;
+  document.body.appendChild(v);
+  fetch(V2_GAS_URL + '?action=ping').then(r=>r.json()).then(d=>{ v.textContent += ' ／ 後端 ' + (d.version||'未知'); }).catch(()=>{ v.textContent += ' ／ 後端連線失敗'; });
+
   document.getElementById('orderDate').value = new Date().toISOString().split('T')[0];
   updateDeliveryDate();
-  const name = localStorage.getItem(LS_CUSTOMER);
-  if (name) document.getElementById('customerName').value = name;
-  try { const s = localStorage.getItem(LS_CART); if (s) cart = JSON.parse(s); } catch(e) { cart = {}; }
   loadRuntimeProducts();
-  buildTabs(); renderProducts(); updatePanel(); updateQuickBtns();
+  buildTabs();
+
+  const urlParams = new URLSearchParams(window.location.search);
+  const editId = urlParams.get('edit');
+
+  if (editId) {
+    // ★ 客戶是透過「專屬連結」進來的 → 一定是要編輯這張訂單，不做「是否已有訂單」的詢問
+    loadOrderForEdit(editId);
+  } else {
+    // ★ 客戶是重新打開頁面（不是透過連結）→ 照舊從瀏覽器記住的資料還原輸入框，
+    //    但等客戶填好名字＋送貨日期後，會去問系統「今天是否已經有訂單」
+    const name = localStorage.getItem(LS_CUSTOMER);
+    if (name) document.getElementById('customerName').value = name;
+    try { const s = localStorage.getItem(LS_CART); if (s) cart = JSON.parse(s); } catch(e) { cart = {}; }
+    renderProducts(); updatePanel(); updateQuickBtns();
+    setupExistingOrderCheck();
+    checkOnPageOpen(); // ★ 一打開頁面就主動檢查（已有訂單／截止時間，一次問完，減少等待時間）
+  }
+}
+
+// ★ v2 新增：頁面一打開，只要客戶名稱欄位有值（不管是自己打的還是瀏覽器記住的），
+// 就主動去問系統「今天是否已有訂單」，有的話顯示一個明顯的可點擊按鈕，
+// 客戶點下去才跳出「修改／重新開單」的選擇（不強制立刻彈窗，比較不打擾）
+// ★ v2 新增：偵測到「今天已有訂單」時，把送出相關按鈕直接鎖成灰色，
+// 客戶只能透過詢問視窗選「修改」或「取消」，沒辦法直接按送出
+function lockSendButtonsForExistingOrder() {
+  ['btnCartTop', 'btnCartSide', 'btnSendLine'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) { el.disabled = true; el.style.opacity = '0.5'; el.style.cursor = 'not-allowed'; el.dataset.v2Locked = '1'; }
+  });
+}
+function unlockSendButtons() {
+  ['btnCartTop', 'btnCartSide', 'btnSendLine'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el && el.dataset.v2Locked === '1') { el.disabled = false; el.style.opacity = ''; el.style.cursor = ''; delete el.dataset.v2Locked; }
+  });
+}
+
+// ★ v2 修改：合併成一次請求，同時取得「今天是否已有訂單」跟「現在是否還在下單時間內」，
+// 減少一次網路來回，讓偵測感覺更快、更無感
+function checkOnPageOpen() {
+  const customer = document.getElementById('customerName').value.trim();
+  const delivery = document.getElementById('deliveryDate').value;
+
+  fetch(V2_GAS_URL + '?action=check&customer=' + encodeURIComponent(customer) + '&date=' + encodeURIComponent(delivery))
+    .then(r => r.json())
+    .then(data => {
+      if (customer && delivery && data.exists && data.editable) {
+        lockSendButtonsForExistingOrder();
+        showV2ClickableBanner('您今天已經下過訂單了，點這裡查看／修改', () => {
+          askContinueOrNew(data.orderId, data.items, customer, delivery, null, data.history);
+        });
+      } else if (!data.windowOpen) {
+        lockSendButtonsForExistingOrder();
+        showV2Banner('locked', '⏰ 今日下單時間已截止，請明天再回來下單，謝謝！');
+      }
+      markSplashDataReady();
+    })
+    .catch(() => { markSplashDataReady(); });
+}
+
+// ★ v2 新增：透過專屬連結進來 → 向後端要這張訂單的最新內容，整個帶入畫面
+function loadOrderForEdit(id) {
+  showV2Banner('loading', '正在載入您的訂單…');
+  fetch(V2_GAS_URL + '?action=order&id=' + encodeURIComponent(id))
+    .then(r => r.json())
+    .then(data => {
+      if (data.error) {
+        showV2Banner('error', '找不到這張訂單，連結可能已失效，請聯絡店家。');
+        renderProducts(); updatePanel(); updateQuickBtns();
+        markSplashDataReady();
+        return;
+      }
+      editingOrderId = id;
+      document.getElementById('customerName').value = data.customer || '';
+      if (data.deliveryDate) document.getElementById('deliveryDate').value = data.deliveryDate;
+      cart = {};
+      (data.items || []).forEach(it => { cart[it.name] = {qty: it.qty, unit: it.unit, note: it.note || ''}; });
+      renderProducts(); updatePanel(); updateQuickBtns();
+
+      if (data.status === 'cancelled') {
+        showV2Banner('error', '這張訂單已經被取消。');
+      } else if (!data.editable) {
+        showV2Banner('locked', '已過截止時間（' + (data.cutoffTime||'') + '），這張訂單無法再修改，如需異動請直接聯絡店家。');
+        lockOrderForm();
+      } else {
+        showV2Banner('editing', '✏️ 正在編輯訂單（' + id + '），修改完成後按「送出」即可更新，截止時間 ' + (data.cutoffTime||'') + '。');
+      }
+      showHistoryLine(data.history);
+      markSplashDataReady();
+    })
+    .catch(() => { showV2Banner('error', '連線失敗，請檢查網路。'); markSplashDataReady(); });
+}
+
+// ★ 新增：顯示這張訂單的修改次數跟每次的時間點，不含每次改了什麼內容
+function showHistoryLine(history) {
+  if (!history || !history.length) return;
+  let el = document.getElementById('v2History');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'v2History';
+    el.style.cssText = 'margin:0 16px 8px;font-size:12px;color:#888;text-align:center;';
+    const banner = document.getElementById('v2Banner');
+    const anchor = banner || document.getElementById('customerName').closest('div');
+    anchor.parentNode.insertBefore(el, anchor.nextSibling);
+  }
+  const label = history.length > 1
+    ? '修改紀錄：' + history.join('、') + '（共 ' + history.length + ' 次，含建立）'
+    : '建立時間：' + history[0];
+  el.textContent = '🕓 ' + label;
+}
+
+// ★ v2 新增：客戶自己打開頁面填名字＋送貨日期時，主動問系統「今天是否已有訂單」
+function setupExistingOrderCheck() {
+  const nameEl = document.getElementById('customerName');
+  const dateEl = document.getElementById('deliveryDate');
+  const trigger = () => {
+    const customer = nameEl.value.trim();
+    const delivery = dateEl.value;
+    if (!customer || !delivery || editingOrderId) return;
+    unlockSendButtons(); // 換了名字/日期，先解鎖，等這次檢查結果出來再決定要不要重新鎖
+    fetch(V2_GAS_URL + '?action=check&customer=' + encodeURIComponent(customer) + '&date=' + encodeURIComponent(delivery))
+      .then(r => r.json())
+      .then(data => {
+        if (data.exists && data.editable) {
+          lockSendButtonsForExistingOrder();
+          showV2ClickableBanner('您今天已經下過訂單了，點這裡查看／修改', () => {
+            askContinueOrNew(data.orderId, data.items, customer, delivery, null, data.history);
+          });
+        }
+      })
+      .catch(() => {});
+  };
+  nameEl.addEventListener('blur', trigger);
+  dateEl.addEventListener('change', trigger);
+}
+
+// ★ v2 修改：拿掉「另外建立新的」，改成「取消訂單」——一個客戶、一個送貨日期，
+// 永遠只會有一張進行中的訂單，客戶只能「修改」或「取消」，不能再開第二張。
+// 取消後狀態變 cancelled，之後系統就找不到「進行中」的訂單了，等於可以重新開始下單。
+function askContinueOrNew(orderId, items, customer, delivery, onChoice, history) {
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;';
+  overlay.innerHTML =
+    '<div style="background:white;border-radius:16px;padding:24px;max-width:340px;width:100%;text-align:center;">' +
+      '<div style="font-size:16px;font-weight:600;color:#2d6a4f;margin-bottom:12px;">您今天（' + delivery + '）已經有一張訂單了</div>' +
+      '<div style="font-size:14px;color:#555;margin-bottom:20px;">請問您是要繼續修改剛剛那張，還是要取消這張訂單？</div>' +
+      '<button id="v2Continue" style="width:100%;background:#2d6a4f;color:white;border:none;border-radius:10px;padding:12px;font-size:15px;font-weight:600;margin-bottom:10px;cursor:pointer;">繼續修改剛剛那張</button>' +
+      '<button id="v2Cancel" style="width:100%;background:#fff5f5;color:#c0392b;border:2px solid #e0a0a0;border-radius:10px;padding:12px;font-size:15px;font-weight:600;cursor:pointer;">❌ 取消今天的訂單</button>' +
+    '</div>';
+  document.body.appendChild(overlay);
+  document.getElementById('v2Continue').onclick = () => {
+    document.body.removeChild(overlay);
+    editingOrderId = orderId;
+    unlockSendButtons();
+    cart = {};
+    (items || []).forEach(it => { cart[it.name] = {qty: it.qty, unit: it.unit, note: it.note || ''}; });
+    renderProducts(); updatePanel(); updateQuickBtns();
+    showV2Banner('editing', '✏️ 正在編輯訂單（' + orderId + '），請確認品項後再按一次「傳送」。');
+    showHistoryLine(history);
+    if (onChoice) onChoice('continue');
+  };
+  document.getElementById('v2Cancel').onclick = () => {
+    document.body.removeChild(overlay);
+    cancelExistingOrder(orderId, customer, delivery);
+    if (onChoice) onChoice('cancelled');
+  };
+}
+
+// ★ v2 新增：取消訂單 → 呼叫後端標記取消 → 直接跳轉 LINE，帶上取消通知訊息
+function cancelExistingOrder(orderId, customer, delivery) {
+  if (!confirm('確定要取消今天（' + delivery + '）的訂單嗎？取消後無法復原，如果要重新下單要整個重填。')) return;
+
+  fetch(V2_GAS_URL + '?action=cancel&id=' + encodeURIComponent(orderId))
+    .then(r => r.json())
+    .then(result => {
+      if (result.error) { alert('取消失敗：' + result.error); return; }
+      editingOrderId = null;
+      unlockSendButtons();
+      cart = {};
+      renderProducts(); updatePanel(); updateQuickBtns();
+      autoSave();
+
+      let msg = '【富煜蔬菜訂單取消通知】\n';
+      msg += '客戶：' + customer + '\n';
+      msg += '🚚 送貨日期：' + delivery + '\n';
+      msg += '此訂單（' + orderId + '）已由客戶取消，請勿出貨，謝謝。\n';
+
+      showV2Banner('error', '❌ 訂單已取消（' + orderId + '）');
+      window.location.href = 'https://line.me/R/share?text=' + encodeURIComponent(msg);
+    })
+    .catch(() => alert('取消失敗，請檢查網路後再試一次。'));
+}
+
+// ★ v2 新增：顯示一個可點擊的按鈕型提示（用於「頁面一打開就發現今天已有訂單」的情境，
+// 不強制彈窗，客戶點了才進一步詢問要修改還是重新開單）
+function showV2ClickableBanner(text, onClick) {
+  let el = document.getElementById('v2ClickBanner');
+  if (!el) {
+    el = document.createElement('button');
+    el.id = 'v2ClickBanner';
+    el.style.cssText = 'display:block;width:calc(100% - 32px);margin:8px 16px;padding:12px 14px;border-radius:10px;'
+      + 'font-size:14px;font-weight:600;text-align:center;background:#fff3cd;color:#856404;border:2px solid #ffe08a;cursor:pointer;';
+    const anchor = document.getElementById('customerName').closest('div');
+    anchor.parentNode.insertBefore(el, anchor.nextSibling);
+  }
+  el.textContent = '📋 ' + text;
+  el.onclick = () => { el.remove(); onClick(); };
+}
+
+function showV2Banner(kind, text) {
+  let el = document.getElementById('v2Banner');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'v2Banner';
+    el.style.cssText = 'margin:8px 16px;padding:10px 14px;border-radius:10px;font-size:13px;text-align:center;';
+    const anchor = document.getElementById('customerName').closest('div');
+    anchor.parentNode.insertBefore(el, anchor.nextSibling);
+  }
+  const colors = {
+    loading: ['#eef', '#446'], editing: ['#d8f3dc','#2d6a4f'], new: ['#e7f5ff','#1864ab'],
+    locked: ['#fff3cd','#856404'], error: ['#f8d7da','#842029']
+  };
+  const c = colors[kind] || colors.new;
+  el.style.background = c[0]; el.style.color = c[1];
+  el.textContent = text;
+}
+
+function lockOrderForm() {
+  document.getElementById('customerName').disabled = true;
+  document.getElementById('deliveryDate').disabled = true;
+  const btn = document.getElementById('btnSendLine');
+  if (btn) { btn.disabled = true; btn.textContent = '已截止，無法修改'; }
 }
 
 function updateDeliveryDate() {
@@ -1393,133 +1658,106 @@ function exportExcel() {
   showToast(msg);
 }
 
+// ★ v2：改成呼叫新的訂單記憶後端（不是舊的 GAS_URL），有 editingOrderId 就是更新，沒有就是新建
 async function openLine() {
-  // 防止重複點擊／重複送出：只要還在傳送中，一律忽略後續點擊
   if (window._isSendingOrder) { return; }
 
   const customer=document.getElementById('customerName').value.trim();
   if (!customer) { alert('請輸入客戶名稱'); document.getElementById('customerName').focus(); return; }
   const orderDate=document.getElementById('orderDate').value||'';
   const delivery=document.getElementById('deliveryDate').value||'';
+  if (!delivery) { alert('請選擇送貨日期'); return; }
 
-  // 購物車必須有品項才能送出；絕對不能用「歷史品項」名單頂替（那份名單只有品名、沒有數量，
-  // 而且不會因為品項被刪除而移除，用它送單會造成「沒有數量」「刪除的品項又出現」的錯誤訂單）
   let items = Object.entries(cart);
-  if (!items.length) {
-    alert('購物車是空的，請先選擇品項再送出訂單！');
-    return;
-  }
+  if (!items.length) { alert('購物車是空的，請先選擇品項再送出訂單！'); return; }
 
-  // 送出前逐一檢查：每個品項都必須有大於 0 的數量，否則擋下來提醒，絕不送出不完整的訂單
   const missingQty = items.filter(([n,info]) => !(parseFloat(info && info.qty) > 0)).map(([n]) => n);
   if (missingQty.length) {
     alert('以下品項還沒有填數量，請填好再送出：\n\n' + missingQty.join('、'));
     return;
   }
 
-  window._isSendingOrder = true;
+  // ★ 修正：不能只依賴「打字後移開游標」才檢查是否已有訂單（欄位若是自動帶出來的，
+  // 使用者可能完全沒有重新點過這個欄位，導致偵測從沒被觸發）。
+  // 這裡在真正送出前，一定再確認一次，確保不會漏掉。
+  if (!editingOrderId) {
+    try {
+      const checkResp = await fetch(V2_GAS_URL + '?action=check&customer=' + encodeURIComponent(customer) + '&date=' + encodeURIComponent(delivery));
+      const checkData = await checkResp.json();
+      if (checkData.exists && checkData.editable) {
+        // 只剩「繼續修改」或「取消」兩個選項，不管選哪個，
+        // 這次原本要送出的內容都先中止，不會被當成一張新訂單送出去
+        await new Promise(resolve => {
+          askContinueOrNew(checkData.orderId, checkData.items, customer, delivery, resolve, checkData.history);
+        });
+        return;
+      }
+    } catch (e) { /* 檢查失敗就照舊新增，不要因為這個檢查卡住整個送出流程 */ }
+  }
 
-  if(Object.keys(cart).length) saveHistory();
+  window._isSendingOrder = true;
+  if (Object.keys(cart).length) saveHistory();
+
+  const isUpdate = !!editingOrderId; // ★ 先記住這次是「修改」還是「新單」，等一下組 LINE 訊息要用
 
   const orderData = {
+    action: 'save',
+    id: editingOrderId || undefined,
     customer: customer,
     orderDate: orderDate,
     deliveryDate: delivery,
-    items: items.map(([n,{qty,unit,note}])=>({name:n,qty:qty||'',unit:unit||'',note:note||''}))
+    items: items.map(([n,{qty,unit,note}]) => ({name:n, qty:qty||'', unit:unit||'', note:note||''}))
   };
 
-  // 組合 LINE 訊息
-  let msg = '【富煜蔬菜訂單】\n';
-  if(customer) msg += '客戶：' + customer + '\n';
-  if(delivery) msg += '🚚 送貨日期：' + delivery + '\n';
-  msg += '─────────────\n';
-  items.forEach(([n,{qty,unit,note}],i)=>{
-    const u = unit || getProductUnits(n)[0] || '';
-    msg += (i+1) + '. ' + n;
-    if(qty) msg += '　' + qty + u;
-    if(note) msg += '（' + note + '）';
-    msg += '\n';
-  });
-  msg += '─────────────\n';
-
-  // 鎖定按鈕防止重複按
   const lineBtn = document.getElementById('btnSendLine');
   if (lineBtn) { lineBtn.disabled = true; lineBtn.textContent = '傳送中...'; }
-
   showToast('傳送中...');
 
   const resetSendButton = () => {
     window._isSendingOrder = false;
-    if (lineBtn) {
-      lineBtn.disabled = false;
-      lineBtn.innerHTML = '<svg class="line-icon" viewBox="0 0 24 24" fill="white"><path d="M19.365 9.863c.349 0 .63.285.63.631 0 .345-.281.63-.63.63H17.61v1.125h1.755c.349 0 .63.283.63.63 0 .344-.281.629-.63.629h-2.386c-.345 0-.627-.285-.627-.629V8.108c0-.345.282-.63.63-.63h2.386c.346 0 .627.285.627.63 0 .349-.281.63-.63.63H17.61v1.125h1.755zm-3.855 3.016c0 .27-.174.51-.432.596-.064.021-.133.031-.199.031-.211 0-.391-.09-.51-.25l-2.443-3.317v2.94c0 .344-.279.629-.631.629-.346 0-.626-.285-.626-.629V8.108c0-.27.173-.51.43-.595.06-.023.136-.033.194-.033.195 0 .375.104.495.254l2.462 3.33V8.108c0-.345.282-.63.63-.63.345 0 .63.285.63.63v4.771zm-5.741 0c0 .344-.282.629-.631.629-.345 0-.627-.285-.627-.629V8.108c0-.345.282-.63.63-.63.346 0 .628.285.628.63v4.771zm-2.466.629H4.917c-.345 0-.63-.285-.63-.629V8.108c0-.345.285-.63.63-.63.348 0 .63.285.63.63v4.141h1.756c.348 0 .629.283.629.63 0 .344-.281.629-.629.629M24 10.314C24 4.943 18.615.572 12 .572S0 4.943 0 10.314c0 4.811 4.27 8.842 10.035 9.608.391.082.923.258 1.058.59.12.301.079.766.038 1.08l-.164 1.02c-.045.301-.24 1.186 1.049.645 1.291-.539 6.916-4.078 9.436-6.975C23.176 14.393 24 12.458 24 10.314"/></svg> 傳送 LINE';
-    }
+    if (lineBtn) { lineBtn.disabled = false; lineBtn.textContent = '傳送 LINE'; }
   };
 
   try {
-    // 步驟1：GAS 存訂單取得 ID 和 GitHub 短網址（10秒超時，失敗自動重試一次）
-    let confirmUrl = '';
-    let orderId = '';
-    const GITHUB_BASE = 'https://tom-teng-ai.github.io/fuyu-order/o/';
+    const resp = await fetch(V2_GAS_URL, { method: 'POST', body: JSON.stringify(orderData) });
+    const result = await resp.json();
 
-    const fetchWithTimeout = (url, options, timeout) => {
-      return Promise.race([
-        fetch(url, options),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), timeout))
-      ]);
-    };
-
-    for (let attempt = 0; attempt < 2; attempt++) {
-      try {
-        const resp = await fetchWithTimeout(GAS_URL, {
-          method: 'POST',
-          body: JSON.stringify(orderData)
-        }, 20000);
-        const result = await resp.json();
-        if (result.id) {
-          orderId = result.id;
-          // GitHub 短網址直接由 ID 組合，一定有
-          confirmUrl = result.githubUrl || (GITHUB_BASE + result.id);
-          break;
-        }
-      } catch(e) {
-        if (attempt === 0) await new Promise(r => setTimeout(r, 2000));
-      }
+    if (result.error) {
+      alert('送出失敗：' + result.error);
+      resetSendButton();
+      return;
     }
 
-    // 步驟2：有 GitHub 短網址，嘗試用 TinyURL 縮得更短（第一順位）
-    if (orderId) {
-      const githubUrl = GITHUB_BASE + orderId;
-      try {
-        const tinyResp = await fetchWithTimeout(
-          'https://tinyurl.com/api-create.php?url=' + encodeURIComponent(githubUrl),
-          {}, 5000
-        );
-        const shortUrl = await tinyResp.text();
-        if (shortUrl.startsWith('https://')) confirmUrl = shortUrl; // TinyURL 成功
-        // TinyURL 失敗則保持 GitHub 短網址
-      } catch(e) {}
-    }
+    editingOrderId = result.id;
+    const editUrl = window.location.origin + window.location.pathname + '?edit=' + result.id;
 
-    // 步驟3：加入連結並開啟 LINE（GitHub 短網址一定有）
-    if (confirmUrl) msg += '📊 確認訂單：' + confirmUrl + '\n';
+    // ★ 修改跟新單，標題跟結尾文字不一樣，讓收到 LINE 的人一眼就能分辨
+    let msg = isUpdate ? '【富煜蔬菜訂單 - 修改】\n' : '【富煜蔬菜訂單】\n';
+    msg += '客戶：' + customer + '\n';
+    msg += '🚚 送貨日期：' + delivery + '\n';
+    msg += '─────────────\n';
+    items.forEach(([n,{qty,unit,note}],i) => {
+      const u = unit || getProductUnits(n)[0] || '';
+      msg += (i+1) + '. ' + n + '　' + qty + u + (note ? '（'+note+'）' : '') + '\n';
+    });
+    msg += '─────────────\n';
+    msg += (isUpdate ? '✏️ 以上為修改後的完整內容，訂單已更新完成。\n' : '');
+    msg += '📝 之後要修改這張訂單，請用同一個連結回來改：\n' + editUrl + '\n';
 
-    // 儲存這次訂單為「上次訂單」（萬一 LINE 沒開成功，客戶可以按「上次訂單」復原，
-    // 絕對不要讓客戶因此改用不完整的舊資料重送）
+    showV2Banner('editing', isUpdate ? '✅ 訂單已更新！' : '✅ 訂單已送出！');
+
+    // ★ 修正：送出成功後要把購物車清空（跟正式系統原本的行為一樣），
+    // 之前漏了這步，變成 autoSave() 又把（還是滿的）購物車存回去，重開頁面東西還在
     localStorage.setItem('lastOrder', JSON.stringify(cart));
     cart = {};
-    renderProducts();
-    updatePanel();
+    editingOrderId = null; // 這次的編輯/新增已經結束，回到乾淨狀態，下次操作重新判斷
+    renderProducts(); updatePanel(); updateQuickBtns();
     autoSave();
 
     window.location.href = 'https://line.me/R/share?text=' + encodeURIComponent(msg);
-
-    // 保險起見，即使頁面沒有真的跳轉走，3 秒後也把按鈕解鎖，
-    // 但因為購物車已清空且不再有「歷史品項頂替」的備援機制，
-    // 就算客戶手滑重按，最多只會看到「購物車是空的」提示，不會送出錯誤訂單
     setTimeout(resetSendButton, 3000);
   } catch (err) {
-    alert('傳送失敗，請檢查網路後再試一次。您的品項可以按「上次訂單」復原。');
+    alert('傳送失敗，請檢查網路後再試一次。');
     resetSendButton();
   }
 }
