@@ -989,7 +989,7 @@ let activeCategory = '全部';
 // ★ v2 新增：這個測試頁面連到全新、獨立的訂單記憶後端，跟現有正式的 GAS_URL 完全分開
 // 部署好新的 Apps Script 後，把網址貼在這裡
 const V2_GAS_URL = 'https://script.google.com/macros/s/AKfycbzJoshr1TCO-8pCC3ICJyHKfhR1Frz9Q2RctGMbs2nsRgjy-2wdhWYKeneV_HaZzTGM/exec';
-const FRONTEND_VERSION = 'v2.3-2026-08-14'; // ★ 新增全螢幕準備畫面，等資料就緒才淡出進入下單畫面
+const FRONTEND_VERSION = 'v2.4-2026-08-19'; // ★ 修正：連點兩下會建立兩筆重複訂單的競速問題
 
 let editingOrderId = null; // 目前是不是正在編輯一張既有訂單（有值代表「更新」，null 代表「新建」）
 
@@ -1660,20 +1660,32 @@ function exportExcel() {
 
 // ★ v2：改成呼叫新的訂單記憶後端（不是舊的 GAS_URL），有 editingOrderId 就是更新，沒有就是新建
 async function openLine() {
+  // ★ 修正：鎖定要「一開始就鎖」，不能等查詢完才鎖，
+  // 不然查詢期間（1-3秒）客戶連點兩次，兩次都會通過檢查、各自建立一筆訂單，
+  // 造成同一個客戶出現兩筆一模一樣的重複新單。
   if (window._isSendingOrder) { return; }
+  window._isSendingOrder = true;
+
+  const lineBtn = document.getElementById('btnSendLine');
+  const releaseLock = () => {
+    window._isSendingOrder = false;
+    if (lineBtn) { lineBtn.disabled = false; lineBtn.textContent = '傳送 LINE'; }
+  };
+  if (lineBtn) { lineBtn.disabled = true; lineBtn.textContent = '確認中...'; }
 
   const customer=document.getElementById('customerName').value.trim();
-  if (!customer) { alert('請輸入客戶名稱'); document.getElementById('customerName').focus(); return; }
+  if (!customer) { alert('請輸入客戶名稱'); document.getElementById('customerName').focus(); releaseLock(); return; }
   const orderDate=document.getElementById('orderDate').value||'';
   const delivery=document.getElementById('deliveryDate').value||'';
-  if (!delivery) { alert('請選擇送貨日期'); return; }
+  if (!delivery) { alert('請選擇送貨日期'); releaseLock(); return; }
 
   let items = Object.entries(cart);
-  if (!items.length) { alert('購物車是空的，請先選擇品項再送出訂單！'); return; }
+  if (!items.length) { alert('購物車是空的，請先選擇品項再送出訂單！'); releaseLock(); return; }
 
   const missingQty = items.filter(([n,info]) => !(parseFloat(info && info.qty) > 0)).map(([n]) => n);
   if (missingQty.length) {
     alert('以下品項還沒有填數量，請填好再送出：\n\n' + missingQty.join('、'));
+    releaseLock();
     return;
   }
 
@@ -1690,12 +1702,12 @@ async function openLine() {
         await new Promise(resolve => {
           askContinueOrNew(checkData.orderId, checkData.items, customer, delivery, resolve, checkData.history);
         });
+        releaseLock();
         return;
       }
     } catch (e) { /* 檢查失敗就照舊新增，不要因為這個檢查卡住整個送出流程 */ }
   }
 
-  window._isSendingOrder = true;
   if (Object.keys(cart).length) saveHistory();
 
   const isUpdate = !!editingOrderId; // ★ 先記住這次是「修改」還是「新單」，等一下組 LINE 訊息要用
@@ -1709,14 +1721,10 @@ async function openLine() {
     items: items.map(([n,{qty,unit,note}]) => ({name:n, qty:qty||'', unit:unit||'', note:note||''}))
   };
 
-  const lineBtn = document.getElementById('btnSendLine');
-  if (lineBtn) { lineBtn.disabled = true; lineBtn.textContent = '傳送中...'; }
+  if (lineBtn) { lineBtn.textContent = '傳送中...'; }
   showToast('傳送中...');
 
-  const resetSendButton = () => {
-    window._isSendingOrder = false;
-    if (lineBtn) { lineBtn.disabled = false; lineBtn.textContent = '傳送 LINE'; }
-  };
+  const resetSendButton = releaseLock;
 
   try {
     const resp = await fetch(V2_GAS_URL, { method: 'POST', body: JSON.stringify(orderData) });
