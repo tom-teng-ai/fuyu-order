@@ -989,7 +989,7 @@ let activeCategory = '全部';
 // ★ v2 新增：這個測試頁面連到全新、獨立的訂單記憶後端，跟現有正式的 GAS_URL 完全分開
 // 部署好新的 Apps Script 後，把網址貼在這裡
 const V2_GAS_URL = 'https://script.google.com/macros/s/AKfycbzJoshr1TCO-8pCC3ICJyHKfhR1Frz9Q2RctGMbs2nsRgjy-2wdhWYKeneV_HaZzTGM/exec';
-const FRONTEND_VERSION = 'v2.5-2026-08-19'; // ★ 新增客戶專屬連結（?c=編號）+ 送貨日期自動鎖定
+const FRONTEND_VERSION = 'v2.6-2026-08-24'; // ★ 修正：送貨日期跟下單日期同一天的時區換算 bug
 
 let editingOrderId = null; // 目前是不是正在編輯一張既有訂單（有值代表「更新」，null 代表「新建」）
 let linkedCustomerId = null; // ★ 新增：透過專屬連結（?c=編號）進來的話，這裡會有值，客戶名稱改用編號識別，不比對打字
@@ -1017,7 +1017,7 @@ function init() {
   document.body.appendChild(v);
   fetch(V2_GAS_URL + '?action=ping').then(r=>r.json()).then(d=>{ v.textContent += ' ／ 後端 ' + (d.version||'未知'); }).catch(()=>{ v.textContent += ' ／ 後端連線失敗'; });
 
-  document.getElementById('orderDate').value = new Date().toISOString().split('T')[0];
+  document.getElementById('orderDate').value = toLocalDateStr_(new Date());
   updateDeliveryDate();
   loadRuntimeProducts();
   buildTabs();
@@ -1287,6 +1287,11 @@ function lockOrderForm() {
   if (btn) { btn.disabled = true; btn.textContent = '已截止，無法修改'; }
 }
 
+// ★ 修正：不要用 toISOString()（會轉成 UTC，台灣 UTC+8 會被吃掉一天），改用本地時間直接組字串
+function toLocalDateStr_(d) {
+  return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+}
+
 // ★ 修改：送貨日期自動計算規則——平常隔天送貨，週日下單則跳過週一公休、送貨日訂為週二
 function updateDeliveryDate() {
   var orderDate = document.getElementById('orderDate').value;
@@ -1295,7 +1300,7 @@ function updateDeliveryDate() {
     var weekday = d.getDay(); // 0=週日, 1=週一, ... 6=週六
     var addDays = (weekday === 0) ? 2 : 1; // 週日下單跳過週一公休，送貨日往後推兩天（變週二）
     d.setDate(d.getDate() + addDays);
-    document.getElementById('deliveryDate').value = d.toISOString().split('T')[0];
+    document.getElementById('deliveryDate').value = toLocalDateStr_(d);
   }
 }
 
@@ -1679,7 +1684,7 @@ function exportExcel() {
 
   const PAGE = 24;
   const totalPages = Math.max(1, Math.ceil(items.length / PAGE));
-  const baseName = `${customer||'訂單'}_${date||new Date().toISOString().slice(0,10)}`;
+  const baseName = `${customer||'訂單'}_${date||toLocalDateStr_(new Date())}`;
 
   for (let p = 0; p < totalPages; p++) {
     const slice = items.slice(p * PAGE, (p + 1) * PAGE);
