@@ -169,11 +169,11 @@
   </div>
   <div class="field-group">
     <label>下單日期</label>
-    <input type="date" id="orderDate" style="width:140px" onchange="updateDeliveryDate()">
+    <input type="date" id="orderDate" style="width:140px" disabled>
   </div>
   <div class="field-group">
-    <label style="color:#059669;font-weight:700">🚚 送貨日期</label>
-    <input type="date" id="deliveryDate" style="width:140px;border-color:#6ee7b7">
+    <label style="color:#059669;font-weight:700">🚚 送貨日期（自動帶入）</label>
+    <input type="date" id="deliveryDate" style="width:140px;border-color:#6ee7b7" disabled>
   </div>
 </div>
 
@@ -989,9 +989,10 @@ let activeCategory = '全部';
 // ★ v2 新增：這個測試頁面連到全新、獨立的訂單記憶後端，跟現有正式的 GAS_URL 完全分開
 // 部署好新的 Apps Script 後，把網址貼在這裡
 const V2_GAS_URL = 'https://script.google.com/macros/s/AKfycbzJoshr1TCO-8pCC3ICJyHKfhR1Frz9Q2RctGMbs2nsRgjy-2wdhWYKeneV_HaZzTGM/exec';
-const FRONTEND_VERSION = 'v2.4-2026-08-19'; // ★ 修正：連點兩下會建立兩筆重複訂單的競速問題
+const FRONTEND_VERSION = 'v2.5-2026-08-19'; // ★ 新增客戶專屬連結（?c=編號）+ 送貨日期自動鎖定
 
 let editingOrderId = null; // 目前是不是正在編輯一張既有訂單（有值代表「更新」，null 代表「新建」）
+let linkedCustomerId = null; // ★ 新增：透過專屬連結（?c=編號）進來的話，這裡會有值，客戶名稱改用編號識別，不比對打字
 
 // ★ v2 新增：全螢幕準備畫面，等背景查詢完成（或至少顯示過最短時間，避免太快閃一下很突兀）才淡出
 let _splashMinTimePassed = false;
@@ -1023,10 +1024,14 @@ function init() {
 
   const urlParams = new URLSearchParams(window.location.search);
   const editId = urlParams.get('edit');
+  const custId = urlParams.get('c');
 
   if (editId) {
-    // ★ 客戶是透過「專屬連結」進來的 → 一定是要編輯這張訂單，不做「是否已有訂單」的詢問
+    // ★ 客戶是透過「訂單專屬連結」進來的 → 一定是要編輯這張訂單，不做「是否已有訂單」的詢問
     loadOrderForEdit(editId);
+  } else if (custId) {
+    // ★ 客戶是透過「客戶專屬連結」進來的 → 用編號查名稱、鎖住名稱欄位，不能自己打字
+    loadCustomerLink(custId);
   } else {
     // ★ 客戶是重新打開頁面（不是透過連結）→ 照舊從瀏覽器記住的資料還原輸入框，
     //    但等客戶填好名字＋送貨日期後，會去問系統「今天是否已經有訂單」
@@ -1037,6 +1042,33 @@ function init() {
     setupExistingOrderCheck();
     checkOnPageOpen(); // ★ 一打開頁面就主動檢查（已有訂單／截止時間，一次問完，減少等待時間）
   }
+}
+
+// ★ v2 新增：透過客戶專屬連結（?c=編號）進來 → 查出客戶名稱、鎖住輸入框，
+// 之後判斷「是否已下單」一律用這個編號比對，不受打字影響
+function loadCustomerLink(custId) {
+  fetch(V2_GAS_URL + '?action=getCustomer&id=' + encodeURIComponent(custId))
+    .then(r => r.json())
+    .then(data => {
+      if (data.error) {
+        document.body.innerHTML = '<div style="padding:60px 24px;text-align:center;color:#c0392b;font-size:16px;line-height:1.8;">此連結不完整或已失效，<br>請聯絡店家取得您的專屬連結。</div>';
+        return;
+      }
+      linkedCustomerId = custId;
+      const nameEl = document.getElementById('customerName');
+      nameEl.value = data.customerName;
+      nameEl.disabled = true;
+      nameEl.style.background = '#f0faf2';
+      nameEl.style.color = '#2d6a4f';
+      nameEl.style.fontWeight = '700';
+
+      try { const s = localStorage.getItem(LS_CART); if (s) cart = JSON.parse(s); } catch(e) { cart = {}; }
+      renderProducts(); updatePanel(); updateQuickBtns();
+      checkOnPageOpen();
+    })
+    .catch(() => {
+      document.body.innerHTML = '<div style="padding:60px 24px;text-align:center;color:#c0392b;font-size:16px;">連線失敗，請檢查網路後重新整理頁面。</div>';
+    });
 }
 
 // ★ v2 新增：頁面一打開，只要客戶名稱欄位有值（不管是自己打的還是瀏覽器記住的），
@@ -1062,11 +1094,12 @@ function unlockSendButtons() {
 function checkOnPageOpen() {
   const customer = document.getElementById('customerName').value.trim();
   const delivery = document.getElementById('deliveryDate').value;
+  const cIdParam = linkedCustomerId ? ('&customerId=' + encodeURIComponent(linkedCustomerId)) : '';
 
-  fetch(V2_GAS_URL + '?action=check&customer=' + encodeURIComponent(customer) + '&date=' + encodeURIComponent(delivery))
+  fetch(V2_GAS_URL + '?action=check&customer=' + encodeURIComponent(customer) + '&date=' + encodeURIComponent(delivery) + cIdParam)
     .then(r => r.json())
     .then(data => {
-      if (customer && delivery && data.exists && data.editable) {
+      if ((customer || linkedCustomerId) && delivery && data.exists && data.editable) {
         lockSendButtonsForExistingOrder();
         showV2ClickableBanner('您今天已經下過訂單了，點這裡查看／修改', () => {
           askContinueOrNew(data.orderId, data.items, customer, delivery, null, data.history);
@@ -1254,11 +1287,14 @@ function lockOrderForm() {
   if (btn) { btn.disabled = true; btn.textContent = '已截止，無法修改'; }
 }
 
+// ★ 修改：送貨日期自動計算規則——平常隔天送貨，週日下單則跳過週一公休、送貨日訂為週二
 function updateDeliveryDate() {
   var orderDate = document.getElementById('orderDate').value;
   if (orderDate) {
-    var d = new Date(orderDate);
-    d.setDate(d.getDate() + 1);
+    var d = new Date(orderDate + 'T00:00:00');
+    var weekday = d.getDay(); // 0=週日, 1=週一, ... 6=週六
+    var addDays = (weekday === 0) ? 2 : 1; // 週日下單跳過週一公休，送貨日往後推兩天（變週二）
+    d.setDate(d.getDate() + addDays);
     document.getElementById('deliveryDate').value = d.toISOString().split('T')[0];
   }
 }
@@ -1694,7 +1730,8 @@ async function openLine() {
   // 這裡在真正送出前，一定再確認一次，確保不會漏掉。
   if (!editingOrderId) {
     try {
-      const checkResp = await fetch(V2_GAS_URL + '?action=check&customer=' + encodeURIComponent(customer) + '&date=' + encodeURIComponent(delivery));
+      const cIdParam = linkedCustomerId ? ('&customerId=' + encodeURIComponent(linkedCustomerId)) : '';
+      const checkResp = await fetch(V2_GAS_URL + '?action=check&customer=' + encodeURIComponent(customer) + '&date=' + encodeURIComponent(delivery) + cIdParam);
       const checkData = await checkResp.json();
       if (checkData.exists && checkData.editable) {
         // 只剩「繼續修改」或「取消」兩個選項，不管選哪個，
@@ -1718,6 +1755,7 @@ async function openLine() {
     customer: customer,
     orderDate: orderDate,
     deliveryDate: delivery,
+    customerId: linkedCustomerId || undefined,
     items: items.map(([n,{qty,unit,note}]) => ({name:n, qty:qty||'', unit:unit||'', note:note||''}))
   };
 
