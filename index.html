@@ -530,7 +530,6 @@ const PRODUCTS = {
     ['栗籽南瓜', ['件', '斤', '顆']],
     ['洋薯', ['件', '斤']],
     ['山苦瓜', ['件', '斤']],
-    ['箭筍片', ['包']],
     ['紅肉地瓜', ['件', '斤']],
     ['黃肉地瓜', ['件', '斤']],
     ['檸檬', ['件', '斤']],
@@ -891,6 +890,7 @@ const PRODUCTS = {
     ['黃喉', ['斤']],
     ['黑毛肚', ['斤']],
     ['鹹蛤蜊', ['斤']],
+    ['箭筍片', ['包']],
   ],
   '雜貨類': [
     ['小魚干', ['斤']],
@@ -989,7 +989,7 @@ let activeCategory = '全部';
 // ★ v2 新增：這個測試頁面連到全新、獨立的訂單記憶後端，跟現有正式的 GAS_URL 完全分開
 // 部署好新的 Apps Script 後，把網址貼在這裡
 const V2_GAS_URL = 'https://script.google.com/macros/s/AKfycbzJoshr1TCO-8pCC3ICJyHKfhR1Frz9Q2RctGMbs2nsRgjy-2wdhWYKeneV_HaZzTGM/exec';
-const FRONTEND_VERSION = 'v2.7-2026-08-25'; // ★ 所有含「件」的品項，單位順序改成「件」排第一個
+const FRONTEND_VERSION = 'v2.8-2026-08-25'; // ★ 箭筍片改分類到海鮮類
 
 let editingOrderId = null; // 目前是不是正在編輯一張既有訂單（有值代表「更新」，null 代表「新建」）
 let linkedCustomerId = null; // ★ 新增：透過專屬連結（?c=編號）進來的話，這裡會有值，客戶名稱改用編號識別，不比對打字
