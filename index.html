@@ -63,7 +63,7 @@
   .qty-controls { display: flex; align-items: center; justify-content: center; gap: 4px; }
   .qty-btn { width: 26px; height: 26px; border-radius: 50%; border: 1.5px solid var(--border); background: white; font-size: 16px; cursor: pointer; display: flex; align-items: center; justify-content: center; color: var(--green); transition: all 0.15s; font-family: inherit; flex-shrink: 0; }
   .qty-btn:hover { background: var(--green); color: white; border-color: var(--green); }
-  .qty-input { width: 44px; height: 26px; border: 1.5px solid var(--border); border-radius: 6px; text-align: center; font-size: 14px; font-weight: 700; font-family: inherit; color: var(--green); outline: none; background: white; }
+  .qty-input { width: 44px; height: 26px; border: 1.5px solid var(--border); border-radius: 6px; text-align: center; font-size: 16px; font-weight: 700; font-family: inherit; color: var(--green); outline: none; background: white; }
   .qty-input:focus { border-color: var(--green); }
   .qty-input::-webkit-inner-spin-button, .qty-input::-webkit-outer-spin-button { -webkit-appearance: none; }
   .qty-input[type=number] { -moz-appearance: textfield; }
@@ -313,7 +313,7 @@
         <img id="quickOrderPhotoImg" style="width:100%;max-height:200px;object-fit:contain;display:block;background:#f5f3ff">
         <button onclick="clearOrderPhoto()" style="position:absolute;top:6px;right:6px;background:rgba(0,0,0,0.5);color:white;border:none;border-radius:50%;width:24px;height:24px;font-size:14px;cursor:pointer;display:flex;align-items:center;justify-content:center;line-height:1">×</button>
       </div>
-      <textarea id="quickOrderText" placeholder="請輸入品項，每行一個&#10;例如：&#10;龍鬚菜 2 斤&#10;白花菜 1 件&#10;板豆腐 3 板" style="width:100%;height:180px;border:1.5px solid #c4b5fd;border-radius:10px;padding:10px 12px;font-size:14px;font-family:inherit;resize:vertical;outline:none;line-height:1.8;box-sizing:border-box;display:block"></textarea>
+      <textarea id="quickOrderText" placeholder="請輸入品項，每行一個&#10;例如：&#10;龍鬚菜 2 斤&#10;白花菜 1 件&#10;板豆腐 3 板" style="width:100%;height:180px;border:1.5px solid #c4b5fd;border-radius:10px;padding:10px 12px;font-size:16px;font-family:inherit;resize:vertical;outline:none;line-height:1.8;box-sizing:border-box;display:block"></textarea>
     </div>
     <div class="modal-footer">
       <button class="btn-secondary" onclick="close1('quickOrderOverlay')">關閉</button>
@@ -989,7 +989,7 @@ let activeCategory = '全部';
 // ★ v2 新增：這個測試頁面連到全新、獨立的訂單記憶後端，跟現有正式的 GAS_URL 完全分開
 // 部署好新的 Apps Script 後，把網址貼在這裡
 const V2_GAS_URL = 'https://script.google.com/macros/s/AKfycbzJoshr1TCO-8pCC3ICJyHKfhR1Frz9Q2RctGMbs2nsRgjy-2wdhWYKeneV_HaZzTGM/exec';
-const FRONTEND_VERSION = 'v2.8-2026-08-25'; // ★ 箭筍片改分類到海鮮類
+const FRONTEND_VERSION = 'v2.9-2026-09-11'; // ★ 修正手機自動縮放：輸入框文字調到16px以上
 
 let editingOrderId = null; // 目前是不是正在編輯一張既有訂單（有值代表「更新」，null 代表「新建」）
 let linkedCustomerId = null; // ★ 新增：透過專屬連結（?c=編號）進來的話，這裡會有值，客戶名稱改用編號識別，不比對打字
@@ -1510,7 +1510,7 @@ function openHistoryModal() {
         <td style="padding:4px 6px;text-align:center">
           <input type="number" min="0" placeholder="數量"
             id="hqty_${idx}"
-            style="width:60px;height:28px;border:1.5px solid var(--border);border-radius:6px;text-align:center;font-size:14px;font-weight:700;font-family:inherit;color:var(--green);outline:none"
+            style="width:60px;height:28px;border:1.5px solid var(--border);border-radius:6px;text-align:center;font-size:16px;font-weight:700;font-family:inherit;color:var(--green);outline:none"
             onclick="this.select()">
         </td>
         <td style="padding:4px 6px;text-align:center">
@@ -1592,7 +1592,7 @@ function openOrderModal() {
       noteinput.type='text';
       noteinput.value=note||'';
       noteinput.placeholder='備註';
-      noteinput.style.cssText='width:80px;border:1px solid var(--border);border-radius:4px;padding:2px 4px;font-size:11px;font-family:inherit;outline:none';
+      noteinput.style.cssText='width:80px;border:1px solid var(--border);border-radius:4px;padding:2px 4px;font-size:16px;font-family:inherit;outline:none';
       noteinput.addEventListener('change',function(){ cart[n].note=this.value; autoSave(); });
       const tdNote=document.createElement('td');
       tdNote.style.padding='6px 8px';
@@ -1602,7 +1602,7 @@ function openOrderModal() {
       const unitSelect = units.length > 1
         ? `<select onchange="cart['${n}'].unit=this.value;autoSave();" style="font-size:12px;border:1.5px solid var(--green);border-radius:6px;padding:3px 6px;font-family:inherit;background:white;color:var(--green);font-weight:600;cursor:pointer;">${unitOptions}</select>`
         : `<span style="font-size:13px">${unit}</span>`;
-      const qtyInput = `<input type="number" value="${qty}" min="0" step="0.5" onchange="if(cart['${n}']){cart['${n}'].qty=parseFloat(this.value)||0;if(cart['${n}'].qty===0){delete cart['${n}'];}renderProducts();updatePanel();autoSave();openOrderModal();}" style="width:52px;border:1.5px solid var(--green);border-radius:6px;padding:3px 4px;font-size:13px;font-weight:600;text-align:center;font-family:inherit;color:var(--green);background:white;outline:none;" />`;
+      const qtyInput = `<input type="number" value="${qty}" min="0" step="0.5" onchange="if(cart['${n}']){cart['${n}'].qty=parseFloat(this.value)||0;if(cart['${n}'].qty===0){delete cart['${n}'];}renderProducts();updatePanel();autoSave();openOrderModal();}" style="width:52px;border:1.5px solid var(--green);border-radius:6px;padding:3px 4px;font-size:16px;font-weight:600;text-align:center;font-family:inherit;color:var(--green);background:white;outline:none;" />`;
       tr.innerHTML=`<td style="padding:6px 8px">${i+1}</td><td style="padding:6px 8px">${n}</td><td style="padding:6px 8px;text-align:center">${qtyInput}</td><td style="padding:6px 8px;text-align:center">${unitSelect}</td>`;
       tr.appendChild(tdNote);
       // 刪除按鈕
