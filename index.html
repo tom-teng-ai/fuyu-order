@@ -2,7 +2,7 @@
 <html lang="zh-TW">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content">
 <title>富煜蔬菜 — 線上下單系統</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap');
@@ -13,7 +13,7 @@
     --text-muted: #6b8f71; --border: #b7dfc1; --shadow: 0 2px 12px rgba(45,106,79,0.10);
     --line: #06C755; --blue: #2563eb;
   }
-  body { font-family: 'Noto Sans TC', sans-serif; background: var(--green-bg); color: var(--text); min-height: 100vh; }
+  body { font-family: 'Noto Sans TC', sans-serif; background: var(--green-bg); color: var(--text); min-height: 100dvh; min-height: var(--app-height, 100vh); }
   .header { background: var(--green); color: white; padding: 0 20px; display: flex; align-items: center; justify-content: space-between; height: 56px; position: sticky; top: 0; z-index: 100; box-shadow: 0 2px 8px rgba(0,0,0,0.15); }
   .logo { font-size: 20px; font-weight: 700; letter-spacing: 2px; }
   .logo span { color: #a8e6bc; }
@@ -50,7 +50,7 @@
   .cat-tab { flex-shrink: 0; padding: 5px 14px; border-radius: 16px; border: 1.5px solid var(--border); background: white; font-size: 12px; font-family: inherit; cursor: pointer; color: var(--text-muted); white-space: nowrap; }
   .cat-tab:hover { border-color: var(--green-light); color: var(--green); }
   .cat-tab.active { background: var(--green); color: white; border-color: var(--green); }
-  .main { display: flex; height: calc(100vh - 290px); }
+  .main { display: flex; height: calc(100dvh - 290px); height: calc(var(--app-height, 100vh) - 290px); }
   .products-area { flex: 1; overflow-y: auto; padding: 14px 20px; }
   .category-section { margin-bottom: 20px; }
   .category-title { font-size: 13px; font-weight: 700; color: var(--green); margin-bottom: 8px; padding-bottom: 4px; border-bottom: 2px solid var(--green-pale); display: flex; align-items: center; gap: 6px; }
@@ -87,9 +87,9 @@
   .total-count strong { color: var(--green); font-size: 15px; }
   .export-btn { background: var(--green); color: white; border: none; border-radius: 10px; padding: 10px; font-size: 14px; font-family: inherit; font-weight: 700; cursor: pointer; }
   .export-btn:hover { background: var(--green-light); }
-  .modal-overlay { display: none; position: fixed; top:0; left:0; right:0; bottom:0; background: rgba(0,0,0,0.45); z-index: 200; align-items: center; justify-content: center; }
+  .modal-overlay { display: none; position: fixed; top:0; left:0; right:0; bottom:0; height: 100vh; height: 100dvh; height: var(--app-height, 100vh); background: rgba(0,0,0,0.45); z-index: 200; align-items: center; justify-content: center; }
   .modal-overlay.open { display: flex; }
-  .modal { background: white; border-radius: 16px; width: 90%; max-width: 520px; max-height: 82vh; overflow: hidden; display: flex; flex-direction: column; box-shadow: 0 20px 60px rgba(0,0,0,0.25); }
+  .modal { background: white; border-radius: 16px; width: 90%; max-width: 520px; max-height: 82vh; max-height: 82dvh; max-height: calc(var(--app-height, 100vh) * 0.82); overflow: hidden; display: flex; flex-direction: column; box-shadow: 0 20px 60px rgba(0,0,0,0.25); }
   .modal-header { padding: 16px 20px; color: white; display: flex; justify-content: space-between; align-items: center; }
   .modal-header.green { background: var(--green); }
   .modal-header.yellow { background: #d97706; }
@@ -138,7 +138,7 @@
     50% { width: 60%; margin-left: 20%; }
     100% { width: 0%; margin-left: 100%; }
   }
-  @media (max-width: 640px) { .order-panel { display: none; } .main { height: calc(100vh - 290px); } .product-grid { grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); } }
+  @media (max-width: 640px) { .order-panel { display: none; } .main { height: calc(100dvh - 290px); height: calc(var(--app-height, 100vh) - 290px); } .product-grid { grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); } }
 </style>
 </head>
 <body>
@@ -297,7 +297,7 @@
       <button onclick="close1('quickOrderOverlay')" style="background:none;border:none;color:white;font-size:22px;cursor:pointer;padding:0 4px">×</button>
     </div>
     <div class="modal-body">
-      <div style="background:#f5f3ff;border:1px solid #c4b5fd;border-radius:10px;padding:12px 14px;margin-bottom:12px;font-size:12px;color:#5b21b6;line-height:1.8">
+      <div id="quickOrderHint" style="background:#f5f3ff;border:1px solid #c4b5fd;border-radius:10px;padding:12px 14px;margin-bottom:12px;font-size:12px;color:#5b21b6;line-height:1.8">
         <strong>輸入格式：</strong>每行一個品項，格式為「品項名稱 數量 單位」<br>
         例如：龍鬚菜 2 斤 / 板豆腐 3 板 / 白花菜 1 件<br>
         數量和單位可以省略（省略數量預設為1，省略單位用品項預設單位）
@@ -313,7 +313,7 @@
         <img id="quickOrderPhotoImg" style="width:100%;max-height:200px;object-fit:contain;display:block;background:#f5f3ff">
         <button onclick="clearOrderPhoto()" style="position:absolute;top:6px;right:6px;background:rgba(0,0,0,0.5);color:white;border:none;border-radius:50%;width:24px;height:24px;font-size:14px;cursor:pointer;display:flex;align-items:center;justify-content:center;line-height:1">×</button>
       </div>
-      <textarea id="quickOrderText" placeholder="請輸入品項，每行一個&#10;例如：&#10;龍鬚菜 2 斤&#10;白花菜 1 件&#10;板豆腐 3 板" style="width:100%;height:180px;border:1.5px solid #c4b5fd;border-radius:10px;padding:10px 12px;font-size:16px;font-family:inherit;resize:vertical;outline:none;line-height:1.8;box-sizing:border-box;display:block"></textarea>
+      <textarea id="quickOrderText" placeholder="請輸入品項，每行一個&#10;例如：&#10;龍鬚菜 2 斤&#10;白花菜 1 件&#10;板豆腐 3 板" style="width:100%;min-height:100px;max-height:38vh;border:1.5px solid #c4b5fd;border-radius:10px;padding:10px 12px;font-size:16px;font-family:inherit;resize:none;outline:none;line-height:1.8;box-sizing:border-box;display:block"></textarea>
     </div>
     <div class="modal-footer">
       <button class="btn-secondary" onclick="close1('quickOrderOverlay')">關閉</button>
@@ -989,7 +989,7 @@ let activeCategory = '全部';
 // ★ v2 新增：這個測試頁面連到全新、獨立的訂單記憶後端，跟現有正式的 GAS_URL 完全分開
 // 部署好新的 Apps Script 後，把網址貼在這裡
 const V2_GAS_URL = 'https://script.google.com/macros/s/AKfycbzJoshr1TCO-8pCC3ICJyHKfhR1Frz9Q2RctGMbs2nsRgjy-2wdhWYKeneV_HaZzTGM/exec';
-const FRONTEND_VERSION = 'v2.9-2026-09-11'; // ★ 修正手機自動縮放：輸入框文字調到16px以上
+const FRONTEND_VERSION = 'v3.0-2026-09-17'; // ★ 套用合豐行版本的 iOS 鍵盤補丁（--app-height + 快速下單焦點處理）
 
 let editingOrderId = null; // 目前是不是正在編輯一張既有訂單（有值代表「更新」，null 代表「新建」）
 let linkedCustomerId = null; // ★ 新增：透過專屬連結（?c=編號）進來的話，這裡會有值，客戶名稱改用編號識別，不比對打字
@@ -2199,6 +2199,41 @@ async function deletePendingOrder(id, btn) {
     alert('刪除失敗');
   }
 }
+
+// ── iOS 鍵盤補丁：讓 --app-height 跟著可視區域縮小 ──
+(function() {
+  function setAppHeight() {
+    var h = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+    document.documentElement.style.setProperty('--app-height', h + 'px');
+  }
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', setAppHeight);
+  }
+  window.addEventListener('resize', setAppHeight);
+  setAppHeight();
+})();
+
+// ── 快速下單 textarea：focus 時收起說明框並滾到輸入區 ──
+(function() {
+  var ta = document.getElementById('quickOrderText');
+  if (!ta) return;
+  ta.addEventListener('focus', function() {
+    // 收起說明框，釋放空間
+    var hint = document.getElementById('quickOrderHint');
+    if (hint) hint.style.display = 'none';
+    // 等鍵盤完全出現後，把 textarea 滾到可見位置
+    setTimeout(function() {
+      ta.scrollIntoView({behavior: 'smooth', block: 'nearest'});
+      var body = ta.closest('.modal-body');
+      if (body) body.scrollTop = body.scrollHeight;
+    }, 350);
+  });
+  ta.addEventListener('blur', function() {
+    // 鍵盤收起後還原說明框（下次打開前會被重設）
+    var hint = document.getElementById('quickOrderHint');
+    if (hint) hint.style.display = '';
+  });
+})();
 </script>
 
 <!-- 待確認訂單 Modal -->
