@@ -63,7 +63,7 @@
   .qty-controls { display: flex; align-items: center; justify-content: center; gap: 4px; }
   .qty-btn { width: 26px; height: 26px; border-radius: 50%; border: 1.5px solid var(--border); background: white; font-size: 16px; cursor: pointer; display: flex; align-items: center; justify-content: center; color: var(--green); transition: all 0.15s; font-family: inherit; flex-shrink: 0; }
   .qty-btn:hover { background: var(--green); color: white; border-color: var(--green); }
-  .qty-input { width: 44px; height: 26px; border: 1.5px solid var(--border); border-radius: 6px; text-align: center; font-size: 16px; font-weight: 700; font-family: inherit; color: var(--green); outline: none; background: white; }
+  .qty-input { width: 44px; height: 26px; border: 1.5px solid var(--border); border-radius: 6px; text-align: center; font-size: 16px; font-weight: 700; font-family: inherit; color: var(--green); outline: none; background: white; cursor: pointer; }
   .qty-input:focus { border-color: var(--green); }
   .qty-input::-webkit-inner-spin-button, .qty-input::-webkit-outer-spin-button { -webkit-appearance: none; }
   .qty-input[type=number] { -moz-appearance: textfield; }
@@ -196,8 +196,9 @@
   </button>
 </div>
 
-<div class="search-bar">
+<div class="search-bar" style="position:relative;">
   <input type="text" class="search-input" id="searchInput" placeholder="搜尋品項..." oninput="filterProducts()">
+  <button id="voiceSearchBtn" onclick="startVoiceSearch()" style="display:none;position:absolute;right:26px;top:50%;transform:translateY(-50%);background:none;border:none;font-size:20px;cursor:pointer;padding:4px;line-height:1;" title="語音搜尋">🎤</button>
 </div>
 
 <div class="cat-tabs" id="catTabs"></div>
@@ -337,6 +338,23 @@
   </div>
 </div>
 
+<!-- 數量輸入 MODAL：固定不動的小視窗，不會跟著品項清單一起捲動，
+     避免鍵盤跳出來的時候，捲動清單、輸入框、鍵盤三者互相干擾造成畫面跳動 -->
+<div class="modal-overlay" id="qtyModalOverlay" onclick="closeOverlay('qtyModalOverlay',event)">
+  <div class="modal" style="max-width:280px">
+    <div style="padding:20px 20px 4px;text-align:center;">
+      <div id="qtyModalName" style="font-weight:700;font-size:16px;color:var(--green);margin-bottom:16px;"></div>
+      <div style="font-size:13px;color:var(--text-muted,#888);margin-bottom:6px;">訂單數量</div>
+      <input type="number" id="qtyModalInput" inputmode="decimal" step="0.5" min="0"
+        onkeydown="if(event.key==='Enter'){confirmQtyModal();}"
+        style="width:100%;box-sizing:border-box;border:2px solid var(--green);border-radius:10px;padding:12px;font-size:22px;font-weight:700;text-align:center;font-family:inherit;color:var(--green);outline:none;">
+    </div>
+    <div class="modal-footer" style="padding:16px 20px 20px;">
+      <button class="btn-secondary" onclick="close1('qtyModalOverlay')">取消</button>
+      <button class="btn-primary" onclick="confirmQtyModal()">確定</button>
+    </div>
+  </div>
+</div>
 
 <!-- 新增品項 MODAL -->
 <div class="modal-overlay" id="addItemOverlay">
@@ -989,7 +1007,7 @@ let activeCategory = '全部';
 // ★ v2 新增：這個測試頁面連到全新、獨立的訂單記憶後端，跟現有正式的 GAS_URL 完全分開
 // 部署好新的 Apps Script 後，把網址貼在這裡
 const V2_GAS_URL = 'https://script.google.com/macros/s/AKfycbzJoshr1TCO-8pCC3ICJyHKfhR1Frz9Q2RctGMbs2nsRgjy-2wdhWYKeneV_HaZzTGM/exec';
-const FRONTEND_VERSION = 'v3.0-2026-09-17'; // ★ 套用合豐行版本的 iOS 鍵盤補丁（--app-height + 快速下單焦點處理）
+const FRONTEND_VERSION = 'v3.5-2026-09-19'; // ★ 數量彈出視窗加上「訂單數量」標籤文字
 
 let editingOrderId = null; // 目前是不是正在編輯一張既有訂單（有值代表「更新」，null 代表「新建」）
 let linkedCustomerId = null; // ★ 新增：透過專屬連結（?c=編號）進來的話，這裡會有值，客戶名稱改用編號識別，不比對打字
@@ -1372,8 +1390,8 @@ function renderProducts() {
         <div class="product-name">${name}</div>
         <div class="qty-controls">
           <button class="qty-btn" onclick="changeQty('${name}',-1)">−</button>
-          <input class="qty-input" type="number" min="0" value="${qty||''}" placeholder="0"
-            onchange="setQty('${name}',this.value)" oninput="setQty('${name}',this.value)" onclick="this.select()">
+          <input class="qty-input" type="text" inputmode="none" readonly value="${qty||''}" placeholder="0"
+            onclick="openQtyModal('${name}')">
           <button class="qty-btn" onclick="changeQty('${name}',1)">＋</button>
         </div>
         <select class="unit-select" onchange="changeUnit('${name}',this.value)" onclick="event.stopPropagation()">
@@ -1399,7 +1417,31 @@ function setQty(name, val) {
     }
     cart[name].qty=n;
   }
-  updateCardStyle(name); updatePanel(); autoSave();
+  updateCard(name); updatePanel(); autoSave();
+}
+
+// ★ 新增：數量輸入改用固定的彈出視窗，不會跟著品項清單一起捲動。
+// 只有按下「確定」才會真正更新（不是每打一個字就更新），輸入過程完全不影響底下的清單畫面。
+let _qtyModalTarget = null;
+
+function openQtyModal(name) {
+  _qtyModalTarget = name;
+  const qty = cart[name] ? cart[name].qty : '';
+  document.getElementById('qtyModalName').textContent = name;
+  const input = document.getElementById('qtyModalInput');
+  input.value = qty || '';
+  const overlay = document.getElementById('qtyModalOverlay');
+  overlay.style.display = 'flex';
+  overlay.classList.add('open');
+  setTimeout(() => { input.focus(); input.select(); }, 50);
+}
+
+function confirmQtyModal() {
+  if (!_qtyModalTarget) return;
+  const val = document.getElementById('qtyModalInput').value;
+  setQty(_qtyModalTarget, val);
+  close1('qtyModalOverlay');
+  _qtyModalTarget = null;
 }
 
 function changeQty(name, delta) {
@@ -1700,6 +1742,15 @@ function exportExcel() {
 }
 
 // ★ v2：改成呼叫新的訂單記憶後端（不是舊的 GAS_URL），有 editingOrderId 就是更新，沒有就是新建
+// ★ 新增：帶超時保護的 fetch，逾時就丟出錯誤（讓呼叫端可以重試或提示，
+// 不會讓客戶卡在「傳送中...」等不到盡頭）
+function fetchWithTimeout(url, options, timeoutMs) {
+  return Promise.race([
+    fetch(url, options),
+    new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), timeoutMs))
+  ]);
+}
+
 async function openLine() {
   // ★ 修正：鎖定要「一開始就鎖」，不能等查詢完才鎖，
   // 不然查詢期間（1-3秒）客戶連點兩次，兩次都會通過檢查、各自建立一筆訂單，
@@ -1736,7 +1787,9 @@ async function openLine() {
   if (!editingOrderId) {
     try {
       const cIdParam = linkedCustomerId ? ('&customerId=' + encodeURIComponent(linkedCustomerId)) : '';
-      const checkResp = await fetch(V2_GAS_URL + '?action=check&customer=' + encodeURIComponent(customer) + '&date=' + encodeURIComponent(delivery) + cIdParam);
+      // ★ 這個「檢查是否已下單」的請求設 15 秒超時，逾時就當作檢查失敗，
+      // 不要讓客戶卡在「確認中...」等不到盡頭 —— 檢查失敗就照舊往下走去新增，不阻擋送出流程
+      const checkResp = await fetchWithTimeout(V2_GAS_URL + '?action=check&customer=' + encodeURIComponent(customer) + '&date=' + encodeURIComponent(delivery) + cIdParam, {}, 15000);
       const checkData = await checkResp.json();
       if (checkData.exists && checkData.editable) {
         // 只剩「繼續修改」或「取消」兩個選項，不管選哪個，
@@ -1747,7 +1800,7 @@ async function openLine() {
         releaseLock();
         return;
       }
-    } catch (e) { /* 檢查失敗就照舊新增，不要因為這個檢查卡住整個送出流程 */ }
+    } catch (e) { /* 檢查失敗或逾時就照舊新增，不要因為這個檢查卡住整個送出流程 */ }
   }
 
   if (Object.keys(cart).length) saveHistory();
@@ -1770,8 +1823,17 @@ async function openLine() {
   const resetSendButton = releaseLock;
 
   try {
-    const resp = await fetch(V2_GAS_URL, { method: 'POST', body: JSON.stringify(orderData) });
-    const result = await resp.json();
+    // ★ 修正：加上「等太久就放棄重試」的保護機制，避免客戶卡在「傳送中...」好幾分鐘不動。
+    // 20 秒等不到回應，自動重試一次；兩次都失敗，才跳出明確的錯誤提示讓客戶自己重按。
+    let resp, result;
+    try {
+      resp = await fetchWithTimeout(V2_GAS_URL, { method: 'POST', body: JSON.stringify(orderData) }, 20000);
+      result = await resp.json();
+    } catch (firstErr) {
+      if (lineBtn) { lineBtn.textContent = '傳送中...（重試中）'; }
+      resp = await fetchWithTimeout(V2_GAS_URL, { method: 'POST', body: JSON.stringify(orderData) }, 20000);
+      result = await resp.json();
+    }
 
     if (result.error) {
       alert('送出失敗：' + result.error);
@@ -2201,16 +2263,30 @@ async function deletePendingOrder(id, btn) {
 }
 
 // ── iOS 鍵盤補丁：讓 --app-height 跟著可視區域縮小 ──
+// ★ 修正：加上「變化夠大才更新」的門檻 + 去抖動，避免打字過程中一點點小抖動
+// 就觸發整個版面重新排版，造成畫面跳動、鍵盤收起的問題。
 (function() {
+  var lastHeight = null;
+  var debounceTimer = null;
+  var MIN_CHANGE = 60; // 小於這個像素差，視為雜訊，不當作「鍵盤真的跳出來/收起去」
+
   function setAppHeight() {
     var h = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+    if (lastHeight !== null && Math.abs(h - lastHeight) < MIN_CHANGE) return;
+    lastHeight = h;
     document.documentElement.style.setProperty('--app-height', h + 'px');
   }
-  if (window.visualViewport) {
-    window.visualViewport.addEventListener('resize', setAppHeight);
+
+  function debouncedSetAppHeight() {
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(setAppHeight, 120);
   }
-  window.addEventListener('resize', setAppHeight);
-  setAppHeight();
+
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', debouncedSetAppHeight);
+  }
+  window.addEventListener('resize', debouncedSetAppHeight);
+  setAppHeight(); // 第一次立刻設定，不用等去抖動
 })();
 
 // ── 快速下單 textarea：focus 時收起說明框並滾到輸入區 ──
@@ -2233,6 +2309,54 @@ async function deletePendingOrder(id, btn) {
     var hint = document.getElementById('quickOrderHint');
     if (hint) hint.style.display = '';
   });
+})();
+
+// ── 語音搜尋（僅支援的裝置才顯示麥克風按鈕，不支援就完全不顯示，不影響原本打字搜尋） ──
+(function() {
+  var SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
+  var btn = document.getElementById('voiceSearchBtn');
+  if (!SpeechRecognitionCtor || !btn) return; // 這支裝置不支援，維持原本搜尋框，不顯示按鈕
+
+  btn.style.display = 'block'; // 支援才顯示
+
+  var recognition = new SpeechRecognitionCtor();
+  recognition.lang = 'zh-TW';
+  recognition.interimResults = false;
+  recognition.maxAlternatives = 1;
+  var listening = false;
+
+  recognition.onresult = function(e) {
+    var text = e.results[0][0].transcript.trim();
+    var input = document.getElementById('searchInput');
+    if (input) {
+      input.value = text;
+      filterProducts();
+    }
+  };
+  recognition.onerror = function() {
+    resetBtn();
+  };
+  recognition.onend = function() {
+    resetBtn();
+  };
+
+  function resetBtn() {
+    listening = false;
+    btn.textContent = '🎤';
+    btn.style.opacity = '';
+  }
+
+  window.startVoiceSearch = function() {
+    if (listening) { recognition.stop(); return; }
+    listening = true;
+    btn.textContent = '🔴';
+    btn.style.opacity = '0.6';
+    try {
+      recognition.start();
+    } catch (e) {
+      resetBtn(); // 有些瀏覽器連續快速觸發 start() 會報錯，安全地重置狀態，不影響其他功能
+    }
+  };
 })();
 </script>
 
