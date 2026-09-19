@@ -1007,10 +1007,136 @@ let activeCategory = '全部';
 // ★ v2 新增：這個測試頁面連到全新、獨立的訂單記憶後端，跟現有正式的 GAS_URL 完全分開
 // 部署好新的 Apps Script 後，把網址貼在這裡
 const V2_GAS_URL = 'https://script.google.com/macros/s/AKfycbzJoshr1TCO-8pCC3ICJyHKfhR1Frz9Q2RctGMbs2nsRgjy-2wdhWYKeneV_HaZzTGM/exec';
-const FRONTEND_VERSION = 'v3.5-2026-09-19'; // ★ 數量彈出視窗加上「訂單數量」標籤文字
+const FRONTEND_VERSION = 'v4.0-2026-09-20'; // ★ 下單/查詢/改單/取消全面改成 Firebase 優先＋GAS 備援，截止時間由 Firebase 規則強制把關
 
 let editingOrderId = null; // 目前是不是正在編輯一張既有訂單（有值代表「更新」，null 代表「新建」）
 let linkedCustomerId = null; // ★ 新增：透過專屬連結（?c=編號）進來的話，這裡會有值，客戶名稱改用編號識別，不比對打字
+
+// ★ Firebase 混合架構：即時查詢/寫入優先走 Firebase（快），失敗自動退回 GAS（慢但保證能用）。
+// 截止時間的強制判斷，最終由 Firebase 安全規則本身把關（比對伺服器時間 now，客戶端無法偽造），
+// 不是只靠這裡的 JavaScript 自己節制。
+const FIREBASE_URL = 'https://fuyu-orders-default-rtdb.asia-southeast1.firebasedatabase.app';
+
+function genFirebaseOrderId_() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let id = '';
+  for (let i = 0; i < 6; i++) id += chars[Math.floor(Math.random() * chars.length)];
+  return id;
+}
+
+// 查「今天是否已下單」：走 Firebase 用 deliveryDate 索引查詢，客戶端再篩選 customer/customerId 是否相符
+function checkExistingFirebase_(customer, deliveryDate, customerId) {
+  const url = FIREBASE_URL + '/orders.json?orderBy=%22deliveryDate%22&equalTo=%22' + encodeURIComponent(deliveryDate) + '%22';
+  return fetch(url).then(r => {
+    if (!r.ok) throw new Error('firebase check failed');
+    return r.json();
+  }).then(data => {
+    if (!data) return { exists: false, windowOpen: true };
+    const match = Object.entries(data).find(([id, o]) => {
+      const sameCustomer = customerId ? (o.customerId === customerId) : (o.customer === customer);
+      return sameCustomer && o.status !== 'cancelled';
+    });
+    if (!match) return { exists: false, windowOpen: true };
+    const [orderId, o] = match;
+    return {
+      exists: true,
+      orderId: orderId,
+      items: o.items || [],
+      editable: true, // ★ 客戶會不會真的改得動，最終還是由 Firebase 規則 / GAS 把關，這裡只是提示用
+      history: [],
+      windowOpen: true
+    };
+  });
+}
+
+// 依 orderId 查完整訂單內容：走 Firebase
+function getOrderFirebase_(orderId) {
+  return Promise.all([
+    fetch(FIREBASE_URL + '/orders/' + orderId + '.json').then(r => {
+      if (!r.ok) throw new Error('firebase get order failed');
+      return r.json();
+    }),
+    fetch(FIREBASE_URL + '/settings.json').then(r => r.json()).catch(() => null)
+  ]).then(([o, settings]) => {
+    if (!o) return { error: 'not_found' };
+    let editable = o.status !== 'cancelled';
+    if (editable && settings && settings.todayStartEpoch && settings.cutoffEpoch) {
+      // ★ 跟 GAS 的 isEditable_ 邏輯對齊：要是今天建立的、而且還沒過截止時間，才算可編輯
+      editable = (o.createdAt >= settings.todayStartEpoch) && (Date.now() < settings.cutoffEpoch);
+    }
+    return {
+      orderId: orderId,
+      customer: o.customer,
+      deliveryDate: o.deliveryDate,
+      items: o.items || [],
+      status: o.status || 'active',
+      editable: editable,
+      cutoffTime: '', // 顯示用，抓不到就留空，不影響功能
+      history: []
+    };
+  });
+}
+
+// 依 customerId 查名稱：走 Firebase
+function getCustomerFirebase_(id) {
+  return fetch(FIREBASE_URL + '/customers/' + id + '.json').then(r => {
+    if (!r.ok) throw new Error('firebase get customer failed');
+    return r.json();
+  }).then(c => {
+    if (!c) return { error: 'not_found' };
+    return { customerId: id, customerName: c.customerName };
+  });
+}
+
+// 新增/更新訂單：直接寫入 Firebase（PUT，用自己的 6 碼編號當 key），
+// 截止時間是否允許寫入，由 Firebase 安全規則本身檢查，不是這裡判斷。
+// 一律標記 synced:false，讓背景的 syncFirebaseToSheets 之後會同步進試算表存底。
+function saveOrderFirebase_(orderId, isUpdate, payload) {
+  const url = FIREBASE_URL + '/orders/' + orderId + '.json';
+  if (isUpdate) {
+    // 更新：只送真正會變動的欄位，用 PATCH 局部更新，其他欄位（customer/customerId/deliveryDate/createdAt）維持不變
+    return fetch(url, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items: payload.items, status: 'active', updatedAt: Date.now(), synced: false })
+    }).then(r => {
+      if (!r.ok) throw new Error('firebase write rejected (可能已過截止時間)');
+      return r.json();
+    });
+  } else {
+    return fetch(url, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        customer: payload.customer,
+        customerId: payload.customerId || '',
+        deliveryDate: payload.deliveryDate,
+        orderDate: payload.orderDate,
+        items: payload.items,
+        status: 'active',
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        synced: false
+      })
+    }).then(r => {
+      if (!r.ok) throw new Error('firebase write rejected (可能已過截止時間)');
+      return r.json();
+    });
+  }
+}
+
+// 取消訂單：走 Firebase，PATCH 標記 cancelled
+function cancelOrderFirebase_(orderId) {
+  return fetch(FIREBASE_URL + '/orders/' + orderId + '.json', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status: 'cancelled', updatedAt: Date.now(), synced: false })
+  }).then(r => {
+    if (!r.ok) throw new Error('firebase cancel rejected');
+    return r.json();
+  });
+}
+
 
 // ★ v2 新增：全螢幕準備畫面，等背景查詢完成（或至少顯示過最短時間，避免太快閃一下很突兀）才淡出
 let _splashMinTimePassed = false;
@@ -1065,27 +1191,34 @@ function init() {
 // ★ v2 新增：透過客戶專屬連結（?c=編號）進來 → 查出客戶名稱、鎖住輸入框，
 // 之後判斷「是否已下單」一律用這個編號比對，不受打字影響
 function loadCustomerLink(custId) {
-  fetch(V2_GAS_URL + '?action=getCustomer&id=' + encodeURIComponent(custId))
-    .then(r => r.json())
-    .then(data => {
-      if (data.error) {
-        document.body.innerHTML = '<div style="padding:60px 24px;text-align:center;color:#c0392b;font-size:16px;line-height:1.8;">此連結不完整或已失效，<br>請聯絡店家取得您的專屬連結。</div>';
-        return;
-      }
-      linkedCustomerId = custId;
-      const nameEl = document.getElementById('customerName');
-      nameEl.value = data.customerName;
-      nameEl.disabled = true;
-      nameEl.style.background = '#f0faf2';
-      nameEl.style.color = '#2d6a4f';
-      nameEl.style.fontWeight = '700';
+  const applyCustomer = (data) => {
+    if (data.error) {
+      document.body.innerHTML = '<div style="padding:60px 24px;text-align:center;color:#c0392b;font-size:16px;line-height:1.8;">此連結不完整或已失效，<br>請聯絡店家取得您的專屬連結。</div>';
+      return;
+    }
+    linkedCustomerId = custId;
+    const nameEl = document.getElementById('customerName');
+    nameEl.value = data.customerName;
+    nameEl.disabled = true;
+    nameEl.style.background = '#f0faf2';
+    nameEl.style.color = '#2d6a4f';
+    nameEl.style.fontWeight = '700';
 
-      try { const s = localStorage.getItem(LS_CART); if (s) cart = JSON.parse(s); } catch(e) { cart = {}; }
-      renderProducts(); updatePanel(); updateQuickBtns();
-      checkOnPageOpen();
-    })
+    try { const s = localStorage.getItem(LS_CART); if (s) cart = JSON.parse(s); } catch(e) { cart = {}; }
+    renderProducts(); updatePanel(); updateQuickBtns();
+    checkOnPageOpen();
+  };
+
+  // ★ 先試 Firebase（快），失敗退回 GAS（慢但保證能用）
+  getCustomerFirebase_(custId)
+    .then(applyCustomer)
     .catch(() => {
-      document.body.innerHTML = '<div style="padding:60px 24px;text-align:center;color:#c0392b;font-size:16px;">連線失敗，請檢查網路後重新整理頁面。</div>';
+      fetch(V2_GAS_URL + '?action=getCustomer&id=' + encodeURIComponent(custId))
+        .then(r => r.json())
+        .then(applyCustomer)
+        .catch(() => {
+          document.body.innerHTML = '<div style="padding:60px 24px;text-align:center;color:#c0392b;font-size:16px;">連線失敗，請檢查網路後重新整理頁面。</div>';
+        });
     });
 }
 
@@ -1114,54 +1247,79 @@ function checkOnPageOpen() {
   const delivery = document.getElementById('deliveryDate').value;
   const cIdParam = linkedCustomerId ? ('&customerId=' + encodeURIComponent(linkedCustomerId)) : '';
 
-  fetch(V2_GAS_URL + '?action=check&customer=' + encodeURIComponent(customer) + '&date=' + encodeURIComponent(delivery) + cIdParam)
-    .then(r => r.json())
-    .then(data => {
-      if ((customer || linkedCustomerId) && delivery && data.exists && data.editable) {
-        lockSendButtonsForExistingOrder();
-        showV2ClickableBanner('您今天已經下過訂單了，點這裡查看／修改', () => {
-          askContinueOrNew(data.orderId, data.items, customer, delivery, null, data.history);
-        });
-      } else if (!data.windowOpen) {
-        lockSendButtonsForExistingOrder();
-        showV2Banner('locked', '⏰ 今日下單時間已截止，請明天再回來下單，謝謝！');
-      }
-      markSplashDataReady();
+  const applyResult = (data) => {
+    if ((customer || linkedCustomerId) && delivery && data.exists && data.editable) {
+      lockSendButtonsForExistingOrder();
+      showV2ClickableBanner('您今天已經下過訂單了，點這裡查看／修改', () => {
+        askContinueOrNew(data.orderId, data.items, customer, delivery, null, data.history);
+      });
+    } else if (data.windowOpen === false) {
+      lockSendButtonsForExistingOrder();
+      showV2Banner('locked', '⏰ 今日下單時間已截止，請明天再回來下單，謝謝！');
+    }
+    markSplashDataReady();
+  };
+
+  const gasFallback = () => {
+    fetch(V2_GAS_URL + '?action=check&customer=' + encodeURIComponent(customer) + '&date=' + encodeURIComponent(delivery) + cIdParam)
+      .then(r => r.json())
+      .then(applyResult)
+      .catch(() => { markSplashDataReady(); });
+  };
+
+  if (!delivery) { markSplashDataReady(); return; }
+
+  // ★ 先試 Firebase（快）：同時查「是否已有訂單」跟「settings 裡的截止時間戳記」，失敗退回 GAS
+  Promise.all([
+    checkExistingFirebase_(customer, delivery, linkedCustomerId),
+    fetch(FIREBASE_URL + '/settings.json').then(r => r.json())
+  ])
+    .then(([existing, settings]) => {
+      const windowOpen = settings && settings.cutoffEpoch ? (Date.now() < settings.cutoffEpoch) : true;
+      applyResult(Object.assign({}, existing, { windowOpen: windowOpen }));
     })
-    .catch(() => { markSplashDataReady(); });
+    .catch(gasFallback);
 }
 
 // ★ v2 新增：透過專屬連結進來 → 向後端要這張訂單的最新內容，整個帶入畫面
 function loadOrderForEdit(id) {
   showV2Banner('loading', '正在載入您的訂單…');
-  fetch(V2_GAS_URL + '?action=order&id=' + encodeURIComponent(id))
-    .then(r => r.json())
-    .then(data => {
-      if (data.error) {
-        showV2Banner('error', '找不到這張訂單，連結可能已失效，請聯絡店家。');
-        renderProducts(); updatePanel(); updateQuickBtns();
-        markSplashDataReady();
-        return;
-      }
-      editingOrderId = id;
-      document.getElementById('customerName').value = data.customer || '';
-      if (data.deliveryDate) document.getElementById('deliveryDate').value = data.deliveryDate;
-      cart = {};
-      (data.items || []).forEach(it => { cart[it.name] = {qty: it.qty, unit: it.unit, note: it.note || ''}; });
-      renderProducts(); updatePanel(); updateQuickBtns();
 
-      if (data.status === 'cancelled') {
-        showV2Banner('error', '這張訂單已經被取消。');
-      } else if (!data.editable) {
-        showV2Banner('locked', '已過截止時間（' + (data.cutoffTime||'') + '），這張訂單無法再修改，如需異動請直接聯絡店家。');
-        lockOrderForm();
-      } else {
-        showV2Banner('editing', '✏️ 正在編輯訂單（' + id + '），修改完成後按「送出」即可更新，截止時間 ' + (data.cutoffTime||'') + '。');
-      }
-      showHistoryLine(data.history);
+  const applyOrder = (data) => {
+    if (data.error) {
+      showV2Banner('error', '找不到這張訂單，連結可能已失效，請聯絡店家。');
+      renderProducts(); updatePanel(); updateQuickBtns();
       markSplashDataReady();
-    })
-    .catch(() => { showV2Banner('error', '連線失敗，請檢查網路。'); markSplashDataReady(); });
+      return;
+    }
+    editingOrderId = id;
+    document.getElementById('customerName').value = data.customer || '';
+    if (data.deliveryDate) document.getElementById('deliveryDate').value = data.deliveryDate;
+    cart = {};
+    (data.items || []).forEach(it => { cart[it.name] = {qty: it.qty, unit: it.unit, note: it.note || ''}; });
+    renderProducts(); updatePanel(); updateQuickBtns();
+
+    if (data.status === 'cancelled') {
+      showV2Banner('error', '這張訂單已經被取消。');
+    } else if (!data.editable) {
+      showV2Banner('locked', '已過截止時間（' + (data.cutoffTime||'') + '），這張訂單無法再修改，如需異動請直接聯絡店家。');
+      lockOrderForm();
+    } else {
+      showV2Banner('editing', '✏️ 正在編輯訂單（' + id + '），修改完成後按「送出」即可更新，截止時間 ' + (data.cutoffTime||'') + '。');
+    }
+    showHistoryLine(data.history);
+    markSplashDataReady();
+  };
+
+  // ★ 先試 Firebase（快），失敗退回 GAS
+  getOrderFirebase_(id)
+    .then(applyOrder)
+    .catch(() => {
+      fetch(V2_GAS_URL + '?action=order&id=' + encodeURIComponent(id))
+        .then(r => r.json())
+        .then(applyOrder)
+        .catch(() => { showV2Banner('error', '連線失敗，請檢查網路。'); markSplashDataReady(); });
+    });
 }
 
 // ★ 新增：顯示這張訂單的修改次數跟每次的時間點，不含每次改了什麼內容
@@ -1243,25 +1401,34 @@ function askContinueOrNew(orderId, items, customer, delivery, onChoice, history)
 function cancelExistingOrder(orderId, customer, delivery) {
   if (!confirm('確定要取消今天（' + delivery + '）的訂單嗎？取消後無法復原，如果要重新下單要整個重填。')) return;
 
-  fetch(V2_GAS_URL + '?action=cancel&id=' + encodeURIComponent(orderId))
-    .then(r => r.json())
-    .then(result => {
-      if (result.error) { alert('取消失敗：' + result.error); return; }
-      editingOrderId = null;
-      unlockSendButtons();
-      cart = {};
-      renderProducts(); updatePanel(); updateQuickBtns();
-      autoSave();
+  const afterCancelOk = () => {
+    editingOrderId = null;
+    unlockSendButtons();
+    cart = {};
+    renderProducts(); updatePanel(); updateQuickBtns();
+    autoSave();
 
-      let msg = '【富煜蔬菜訂單取消通知】\n';
-      msg += '客戶：' + customer + '\n';
-      msg += '🚚 送貨日期：' + delivery + '\n';
-      msg += '此訂單（' + orderId + '）已由客戶取消，請勿出貨，謝謝。\n';
+    let msg = '【富煜蔬菜訂單取消通知】\n';
+    msg += '客戶：' + customer + '\n';
+    msg += '🚚 送貨日期：' + delivery + '\n';
+    msg += '此訂單（' + orderId + '）已由客戶取消，請勿出貨，謝謝。\n';
 
-      showV2Banner('error', '❌ 訂單已取消（' + orderId + '）');
-      window.location.href = 'https://line.me/R/share?text=' + encodeURIComponent(msg);
-    })
-    .catch(() => alert('取消失敗，請檢查網路後再試一次。'));
+    showV2Banner('error', '❌ 訂單已取消（' + orderId + '）');
+    window.location.href = 'https://line.me/R/share?text=' + encodeURIComponent(msg);
+  };
+
+  // ★ 先試 Firebase（快，且截止時間由 Firebase 規則本身強制把關），失敗退回 GAS
+  cancelOrderFirebase_(orderId)
+    .then(afterCancelOk)
+    .catch(() => {
+      fetch(V2_GAS_URL + '?action=cancel&id=' + encodeURIComponent(orderId))
+        .then(r => r.json())
+        .then(result => {
+          if (result.error) { alert('取消失敗：' + result.error); return; }
+          afterCancelOk();
+        })
+        .catch(() => alert('取消失敗，請檢查網路後再試一次。'));
+    });
 }
 
 // ★ v2 新增：顯示一個可點擊的按鈕型提示（用於「頁面一打開就發現今天已有訂單」的情境，
@@ -1786,11 +1953,15 @@ async function openLine() {
   // 這裡在真正送出前，一定再確認一次，確保不會漏掉。
   if (!editingOrderId) {
     try {
-      const cIdParam = linkedCustomerId ? ('&customerId=' + encodeURIComponent(linkedCustomerId)) : '';
-      // ★ 這個「檢查是否已下單」的請求設 15 秒超時，逾時就當作檢查失敗，
-      // 不要讓客戶卡在「確認中...」等不到盡頭 —— 檢查失敗就照舊往下走去新增，不阻擋送出流程
-      const checkResp = await fetchWithTimeout(V2_GAS_URL + '?action=check&customer=' + encodeURIComponent(customer) + '&date=' + encodeURIComponent(delivery) + cIdParam, {}, 15000);
-      const checkData = await checkResp.json();
+      // ★ 先試 Firebase（快），失敗才退回 GAS（有 15 秒超時保護，逾時就當作檢查失敗、照舊往下走去新增）
+      let checkData;
+      try {
+        checkData = await checkExistingFirebase_(customer, delivery, linkedCustomerId);
+      } catch (fbErr) {
+        const cIdParam = linkedCustomerId ? ('&customerId=' + encodeURIComponent(linkedCustomerId)) : '';
+        const checkResp = await fetchWithTimeout(V2_GAS_URL + '?action=check&customer=' + encodeURIComponent(customer) + '&date=' + encodeURIComponent(delivery) + cIdParam, {}, 15000);
+        checkData = await checkResp.json();
+      }
       if (checkData.exists && checkData.editable) {
         // 只剩「繼續修改」或「取消」兩個選項，不管選哪個，
         // 這次原本要送出的內容都先中止，不會被當成一張新訂單送出去
@@ -1806,6 +1977,9 @@ async function openLine() {
   if (Object.keys(cart).length) saveHistory();
 
   const isUpdate = !!editingOrderId; // ★ 先記住這次是「修改」還是「新單」，等一下組 LINE 訊息要用
+  const targetOrderId = editingOrderId || genFirebaseOrderId_(); // ★ 新單先在客戶端產生一組編號，Firebase 用它當 key
+
+  const itemsForSave = items.map(([n,{qty,unit,note}]) => ({name:n, qty:qty||'', unit:unit||'', note:note||''}));
 
   const orderData = {
     action: 'save',
@@ -1814,7 +1988,7 @@ async function openLine() {
     orderDate: orderDate,
     deliveryDate: delivery,
     customerId: linkedCustomerId || undefined,
-    items: items.map(([n,{qty,unit,note}]) => ({name:n, qty:qty||'', unit:unit||'', note:note||''}))
+    items: itemsForSave
   };
 
   if (lineBtn) { lineBtn.textContent = '傳送中...'; }
@@ -1823,26 +1997,41 @@ async function openLine() {
   const resetSendButton = releaseLock;
 
   try {
-    // ★ 修正：加上「等太久就放棄重試」的保護機制，避免客戶卡在「傳送中...」好幾分鐘不動。
-    // 20 秒等不到回應，自動重試一次；兩次都失敗，才跳出明確的錯誤提示讓客戶自己重按。
-    let resp, result;
+    let finalOrderId;
+
+    // ★ 先試 Firebase：快，而且截止時間是否允許寫入，由 Firebase 安全規則本身強制檢查
+    // （比對伺服器時間，客戶端無法偽造），不是只靠這裡的 JavaScript 自己節制。
     try {
-      resp = await fetchWithTimeout(V2_GAS_URL, { method: 'POST', body: JSON.stringify(orderData) }, 20000);
-      result = await resp.json();
-    } catch (firstErr) {
-      if (lineBtn) { lineBtn.textContent = '傳送中...（重試中）'; }
-      resp = await fetchWithTimeout(V2_GAS_URL, { method: 'POST', body: JSON.stringify(orderData) }, 20000);
-      result = await resp.json();
+      await saveOrderFirebase_(targetOrderId, isUpdate, {
+        customer: customer,
+        customerId: linkedCustomerId || '',
+        deliveryDate: delivery,
+        orderDate: orderDate,
+        items: itemsForSave
+      });
+      finalOrderId = targetOrderId;
+    } catch (fbErr) {
+      // Firebase 失敗（不管是網路問題，還是被規則擋下來，例如真的過了截止時間），
+      // 退回 GAS：GAS 自己也有一樣的截止時間判斷，會給出正確、明確的錯誤訊息。
+      let resp, result;
+      try {
+        resp = await fetchWithTimeout(V2_GAS_URL, { method: 'POST', body: JSON.stringify(orderData) }, 20000);
+        result = await resp.json();
+      } catch (firstErr) {
+        if (lineBtn) { lineBtn.textContent = '傳送中...（重試中）'; }
+        resp = await fetchWithTimeout(V2_GAS_URL, { method: 'POST', body: JSON.stringify(orderData) }, 20000);
+        result = await resp.json();
+      }
+      if (result.error) {
+        alert('送出失敗：' + result.error);
+        resetSendButton();
+        return;
+      }
+      finalOrderId = result.id;
     }
 
-    if (result.error) {
-      alert('送出失敗：' + result.error);
-      resetSendButton();
-      return;
-    }
-
-    editingOrderId = result.id;
-    const editUrl = window.location.origin + window.location.pathname + '?edit=' + result.id;
+    editingOrderId = finalOrderId;
+    const editUrl = window.location.origin + window.location.pathname + '?edit=' + finalOrderId;
 
     // ★ 修改跟新單，標題跟結尾文字不一樣，讓收到 LINE 的人一眼就能分辨
     let msg = isUpdate ? '【富煜蔬菜訂單 - 修改】\n' : '【富煜蔬菜訂單】\n';
