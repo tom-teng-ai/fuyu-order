@@ -1007,7 +1007,7 @@ let activeCategory = '全部';
 // ★ v2 新增：這個測試頁面連到全新、獨立的訂單記憶後端，跟現有正式的 GAS_URL 完全分開
 // 部署好新的 Apps Script 後，把網址貼在這裡
 const V2_GAS_URL = 'https://script.google.com/macros/s/AKfycbzJoshr1TCO-8pCC3ICJyHKfhR1Frz9Q2RctGMbs2nsRgjy-2wdhWYKeneV_HaZzTGM/exec';
-const FRONTEND_VERSION = 'v4.0-2026-09-20'; // ★ 下單/查詢/改單/取消全面改成 Firebase 優先＋GAS 備援，截止時間由 Firebase 規則強制把關
+const FRONTEND_VERSION = 'v4.1-2026-09-23'; // ★ 常用品項、確認訂單的數量輸入，也改成彈出固定視窗，避免鍵盤跳出造成畫面跳動
 
 let editingOrderId = null; // 目前是不是正在編輯一張既有訂單（有值代表「更新」，null 代表「新建」）
 let linkedCustomerId = null; // ★ 新增：透過專屬連結（?c=編號）進來的話，這裡會有值，客戶名稱改用編號識別，不比對打字
@@ -1589,14 +1589,31 @@ function setQty(name, val) {
 
 // ★ 新增：數量輸入改用固定的彈出視窗，不會跟著品項清單一起捲動。
 // 只有按下「確定」才會真正更新（不是每打一個字就更新），輸入過程完全不影響底下的清單畫面。
+// ★ 修改：現在支援兩種模式，讓「常用品項」「確認訂單」也能共用同一套彈出視窗：
+//   - mode 'cart'（預設）：直接改購物車（主畫面品項卡片、確認訂單畫面用）
+//   - mode 'input'：只改某個輸入框顯示的數字，不碰購物車（常用品項那種「先暫存、按加入才生效」的畫面用）
 let _qtyModalTarget = null;
+let _qtyModalMode = 'cart';
+let _qtyModalInputEl = null;
+let _qtyModalAfterConfirm = null;
 
-function openQtyModal(name) {
+function openQtyModal(name, opts) {
+  opts = opts || {};
   _qtyModalTarget = name;
-  const qty = cart[name] ? cart[name].qty : '';
+  _qtyModalMode = opts.mode || 'cart';
+  _qtyModalInputEl = opts.inputEl || null;
+  _qtyModalAfterConfirm = opts.afterConfirm || null;
+
+  let currentQty = '';
+  if (_qtyModalMode === 'cart') {
+    currentQty = cart[name] ? cart[name].qty : '';
+  } else if (_qtyModalInputEl) {
+    currentQty = _qtyModalInputEl.value || '';
+  }
+
   document.getElementById('qtyModalName').textContent = name;
   const input = document.getElementById('qtyModalInput');
-  input.value = qty || '';
+  input.value = currentQty || '';
   const overlay = document.getElementById('qtyModalOverlay');
   overlay.style.display = 'flex';
   overlay.classList.add('open');
@@ -1606,9 +1623,20 @@ function openQtyModal(name) {
 function confirmQtyModal() {
   if (!_qtyModalTarget) return;
   const val = document.getElementById('qtyModalInput').value;
-  setQty(_qtyModalTarget, val);
+
+  if (_qtyModalMode === 'cart') {
+    setQty(_qtyModalTarget, val);
+  } else if (_qtyModalInputEl) {
+    _qtyModalInputEl.value = val;
+  }
+
   close1('qtyModalOverlay');
+  const afterConfirm = _qtyModalAfterConfirm;
   _qtyModalTarget = null;
+  _qtyModalMode = 'cart';
+  _qtyModalInputEl = null;
+  _qtyModalAfterConfirm = null;
+  if (afterConfirm) afterConfirm();
 }
 
 function changeQty(name, delta) {
@@ -1717,10 +1745,10 @@ function openHistoryModal() {
       return `<tr id="hrow_${idx}" style="border-bottom:1px solid var(--green-pale)">
         <td style="padding:7px 8px;font-weight:500">${name}</td>
         <td style="padding:4px 6px;text-align:center">
-          <input type="number" min="0" placeholder="數量"
+          <input type="text" inputmode="none" readonly min="0" placeholder="數量"
             id="hqty_${idx}"
-            style="width:60px;height:28px;border:1.5px solid var(--border);border-radius:6px;text-align:center;font-size:16px;font-weight:700;font-family:inherit;color:var(--green);outline:none"
-            onclick="this.select()">
+            style="width:60px;height:28px;border:1.5px solid var(--border);border-radius:6px;text-align:center;font-size:16px;font-weight:700;font-family:inherit;color:var(--green);outline:none;cursor:pointer"
+            onclick="openQtyModal('${name}', {mode:'input', inputEl: document.getElementById('hqty_${idx}')})">
         </td>
         <td style="padding:4px 6px;text-align:center">
           <select id="hunit_${idx}" style="font-size:12px;border:1.5px solid var(--green);border-radius:6px;padding:4px 6px;font-family:inherit;background:white;color:var(--green);font-weight:600;cursor:pointer;min-width:48px;">
@@ -1811,7 +1839,7 @@ function openOrderModal() {
       const unitSelect = units.length > 1
         ? `<select onchange="cart['${n}'].unit=this.value;autoSave();" style="font-size:12px;border:1.5px solid var(--green);border-radius:6px;padding:3px 6px;font-family:inherit;background:white;color:var(--green);font-weight:600;cursor:pointer;">${unitOptions}</select>`
         : `<span style="font-size:13px">${unit}</span>`;
-      const qtyInput = `<input type="number" value="${qty}" min="0" step="0.5" onchange="if(cart['${n}']){cart['${n}'].qty=parseFloat(this.value)||0;if(cart['${n}'].qty===0){delete cart['${n}'];}renderProducts();updatePanel();autoSave();openOrderModal();}" style="width:52px;border:1.5px solid var(--green);border-radius:6px;padding:3px 4px;font-size:16px;font-weight:600;text-align:center;font-family:inherit;color:var(--green);background:white;outline:none;" />`;
+      const qtyInput = `<input type="text" inputmode="none" readonly value="${qty}" onclick="openQtyModal('${n}', {mode:'cart', afterConfirm: openOrderModal})" style="width:52px;border:1.5px solid var(--green);border-radius:6px;padding:3px 4px;font-size:16px;font-weight:600;text-align:center;font-family:inherit;color:var(--green);background:white;outline:none;cursor:pointer;" />`;
       tr.innerHTML=`<td style="padding:6px 8px">${i+1}</td><td style="padding:6px 8px">${n}</td><td style="padding:6px 8px;text-align:center">${qtyInput}</td><td style="padding:6px 8px;text-align:center">${unitSelect}</td>`;
       tr.appendChild(tdNote);
       // 刪除按鈕
