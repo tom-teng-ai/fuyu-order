@@ -1007,7 +1007,7 @@ let activeCategory = '全部';
 // ★ v2 新增：這個測試頁面連到全新、獨立的訂單記憶後端，跟現有正式的 GAS_URL 完全分開
 // 部署好新的 Apps Script 後，把網址貼在這裡
 const V2_GAS_URL = 'https://script.google.com/macros/s/AKfycbzJoshr1TCO-8pCC3ICJyHKfhR1Frz9Q2RctGMbs2nsRgjy-2wdhWYKeneV_HaZzTGM/exec';
-const FRONTEND_VERSION = 'v4.2-2026-09-23'; // ★ 常用品項、確認訂單的數量輸入，也改成彈出固定視窗，避免鍵盤跳出造成畫面跳動
+const FRONTEND_VERSION = 'v4.3-2026-09-23'; // ★ v4.3：啟動時從Firebase /settings/catalog 載入品項目錄，暫停販售的品項不顯示
 
 let editingOrderId = null; // 目前是不是正在編輯一張既有訂單（有值代表「更新」，null 代表「新建」）
 let linkedCustomerId = null; // ★ 新增：透過專屬連結（?c=編號）進來的話，這裡會有值，客戶名稱改用編號識別，不比對打字
@@ -1200,6 +1200,23 @@ function init() {
   updateDeliveryDate();
   loadRuntimeProducts();
   buildTabs();
+  // ★ v4.3：非同步載入雲端品項目錄（/settings/catalog），失敗不影響主程式
+  (async()=>{
+    try{
+      const r=await fetch(FIREBASE_URL+'/settings/catalog.json');
+      if(!r.ok)return;
+      const catalog=await r.json();
+      if(!catalog||typeof catalog!=='object'||!Object.keys(catalog).length)return;
+      // 轉換成 PRODUCTS 格式，並過濾暫停販售的品項
+      const prod={};
+      for(const [cat,items] of Object.entries(catalog)){
+        if(!Array.isArray(items))continue;
+        const active=items.filter(it=>!it.suspended).map(it=>[it.name,it.units||['件','斤']]);
+        if(active.length)prod[cat]=active;
+      }
+      if(Object.keys(prod).length)updateRuntimeProducts(prod);
+    }catch(e){/* 載入失敗，使用預設品項，不影響主程式 */}
+  })();
 
   const urlParams = new URLSearchParams(window.location.search);
   const editId = urlParams.get('edit');
